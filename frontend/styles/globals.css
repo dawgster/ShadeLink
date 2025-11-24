@@ -228,6 +228,23 @@ html {
   font-size: 1.5rem;
 }
 
+.intent-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.intent-table th,
+.intent-table td {
+  border: 1px solid #eaeaea;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.intent-table th {
+  background: #f6f6f6;
+}
+
 .subtitleLogo {
   height: 2em;
   width: auto;

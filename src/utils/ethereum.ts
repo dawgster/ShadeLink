@@ -1,8 +1,9 @@
 import { contracts, chainAdapters } from "chainsig.js";
 import { createPublicClient, http } from "viem";
+import { config } from "../config";
 
-export const ethRpcUrl = "https://sepolia.drpc.org";
-export const ethContractAddress = "0xb8d9b079F1604e9016137511464A1Fe97F8e2Bd8";
+export const ethRpcUrl = config.ethRpcUrl;
+export const ethContractAddress = config.ethContractAddress;
 
 export const ethContractAbi = [
   {

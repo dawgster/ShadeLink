@@ -12,6 +12,10 @@ export default function Home() {
   const [agentBalance, setAgentBalance] = useState("0");
   const [ethAddress, setEthAddress] = useState("");
   const [ethBalance, setEthBalance] = useState("0");
+  const [solAgentAddress, setSolAgentAddress] = useState("");
+  const [solAgentPath, setSolAgentPath] = useState("");
+  const [solAgentBalance, setSolAgentBalance] = useState("");
+  const [intents, setIntents] = useState([]);
   const [contractPrice, setContractPrice] = useState(null);
   const [lastTxHash, setLastTxHash] = useState(null);
   const [error, setError] = useState("");
@@ -46,6 +50,40 @@ export default function Home() {
     } catch (error) {
       console.log("Error getting agent account:", error);
       setError("Failed to get agent account details");
+    }
+  };
+
+  const getSolAgentAccount = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/sol-account`).then((r) =>
+        r.json(),
+      );
+      if (res.error) {
+        throw new Error(res.error);
+      }
+      setSolAgentAddress(res.address);
+      setSolAgentPath(res.path);
+      if (res.balanceLamports && res.balanceSol !== undefined) {
+        setSolAgentBalance(
+          formatBalance(res.balanceLamports, 9, 6) ?? res.balanceSol,
+        );
+      }
+    } catch (err) {
+      console.log("Error getting solana agent account:", err);
+      setError("Failed to get Solana agent address");
+    }
+  };
+
+  const getIntentStatuses = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/status`).then((r) => r.json());
+      if (res.error) {
+        throw new Error(res.error);
+      }
+      setIntents(res.intents || []);
+    } catch (err) {
+      console.log("Error fetching intent statuses:", err);
+      setError("Failed to fetch intent statuses");
     }
   };
 
@@ -86,9 +124,12 @@ export default function Home() {
 
   // Set up the initial state
   useEffect(() => {
+    document.title = "Zolanear ShadeLink Agent";
     getAgentAccount();
+    getSolAgentAccount();
     getEthAccount();
     getPrice();
+    getIntentStatuses();
   }, []);
 
   return (
@@ -99,7 +140,7 @@ export default function Home() {
       <Overlay message={message} />
 
       <main className="main">
-        <h1 className="title">ETH Price Oracle</h1>
+        <h1 className="title">Zolanear ShadeLink Agent</h1>
         <div className="subtitleContainer">
           <h2 className="subtitle">Powered by Shade Agents</h2>
         </div>
@@ -188,6 +229,52 @@ export default function Home() {
             </p>
           </div>
 
+          <div className="card">
+            <h3>Solana Agent Address</h3>
+            <p>
+              <br />
+              {solAgentAddress ? (
+                <>
+                  {solAgentAddress.substring(0, 10)}...
+                  {solAgentAddress.substring(solAgentAddress.length - 4)}
+                  <br />
+                  <small>path: {solAgentPath || "solana-1"}</small>
+                  <br />
+                  Balance: {solAgentBalance || "0"} SOL
+                  <br />
+                  <br />
+                  <button className="btn" onClick={getIntentStatuses}>
+                    refresh intents
+                  </button>
+                  <br />
+                  <br />
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      try {
+                        if (
+                          navigator.clipboard &&
+                          navigator.clipboard.writeText
+                        ) {
+                          navigator.clipboard.writeText(solAgentAddress);
+                          setMessageHide("Copied", 500, true);
+                        } else {
+                          setMessageHide("Clipboard not supported", 3000, true);
+                        }
+                      } catch (e) {
+                        setMessageHide("Copy failed", 3000, true);
+                      }
+                    }}
+                  >
+                    copy
+                  </button>
+                </>
+              ) : (
+                "Loading..."
+              )}
+            </p>
+          </div>
+
           {/* Display the Ethereum account details */}
           <div className="card">
             <h3>Fund Sepolia Account</h3>
@@ -237,24 +324,60 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Display the button to set the price in the Ethereum contract */}
-          <a
-            href="#"
-            className="card"
-            onClick={async () => {
-              setMessage({
-                text: "Querying and sending the ETH price to the Ethereum contract...",
-                success: false,
-              });
-              await setPrice();
-            }}
-          >
-            <h3>Set ETH Price</h3>
-            <p className="code">
-              Click to set the ETH price in the smart contract
-            </p>
-          </a>
-        </div>
+        {/* Display the button to set the price in the Ethereum contract */}
+        <a
+          href="#"
+          className="card"
+          onClick={async () => {
+            setMessage({
+              text: "Querying and sending the ETH price to the Ethereum contract...",
+              success: false,
+            });
+            await setPrice();
+          }}
+        >
+          <h3>Set ETH Price</h3>
+          <p className="code">
+            Click to set the ETH price in the smart contract
+          </p>
+        </a>
+      </div>
+
+      <div className="card">
+        <h3>Current Intents (latest)</h3>
+        {intents && intents.length ? (
+          <table className="intent-table">
+            <thead>
+              <tr>
+                <th>Intent ID</th>
+                <th>Status</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {intents.map((intent) => (
+                <tr key={intent.intentId}>
+                  <td title={intent.intentId}>
+                    {intent.intentId.length > 18
+                      ? `${intent.intentId.slice(0, 8)}...${intent.intentId.slice(-6)}`
+                      : intent.intentId}
+                  </td>
+                  <td>{intent.state}</td>
+                  <td>
+                    {intent.txId
+                      ? `tx: ${intent.txId}`
+                      : intent.error
+                        ? `error: ${intent.error}`
+                        : intent.detail || "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p>No intents found (last 24h window)</p>
+        )}
+      </div>
       </main>
 
       {/* Display the terms of use link */}

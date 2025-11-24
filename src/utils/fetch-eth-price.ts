@@ -1,8 +1,17 @@
+import { fetchWithRetry } from "./http";
+import { config } from "../config";
+
+const PRICE_FETCH_TIMEOUT_MS = 7000;
+
 // Fetch ETH price from OKX
 async function getETHPriceFromOKX(): Promise<number | null> {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       "https://www.okx.com/api/v5/market/ticker?instId=ETH-USDT",
+      undefined,
+      config.priceFeedMaxAttempts,
+      config.priceFeedRetryBackoffMs,
+      PRICE_FETCH_TIMEOUT_MS,
     );
     if (!response.ok) {
       throw new Error(`OKX API error: ${response.status}`);
@@ -21,8 +30,12 @@ async function getETHPriceFromOKX(): Promise<number | null> {
 // Fetch ETH price from Coinbase
 async function getETHPriceFromCoinbase(): Promise<number | null> {
   try {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       "https://api.coinbase.com/v2/prices/ETH-USD/spot",
+      undefined,
+      config.priceFeedMaxAttempts,
+      config.priceFeedRetryBackoffMs,
+      PRICE_FETCH_TIMEOUT_MS,
     );
     if (!response.ok) {
       throw new Error(`Coinbase API error: ${response.status}`);

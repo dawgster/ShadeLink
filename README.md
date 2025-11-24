@@ -142,6 +142,45 @@ Send a transaction through the Agent to update the price of Eth:
 http://localhost:3000/api/transaction
 ```
 
+Enqueue a Solana swap intent (this pushes directly into the Redis queue the consumer watches). The backend will auto-set `intermediateAsset` to native SOL on Solana; include the amount that will land on Solana so the destination-leg swap can run:
+
+```bash
+curl -X POST http://localhost:3000/api/intents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "intentId": "demo-123",
+    "sourceChain": "near",
+    "destinationChain": "solana",
+    "sourceAsset": "So11111111111111111111111111111111111111112",
+    "finalAsset": "Es9vMFrzaCER2bzzvGoGd8h1DRrtSuE7x6JkGpqYH9t",
+    "sourceAmount": "1000000",
+    "destinationAmount": "1000000",
+    "slippageBps": 200,
+    "userDestination": "UserSolPubKey11111111111111111111111111111",
+    "agentDestination": "AgentSolPubKey1111111111111111111111111111"
+  }'
+```
+
+Get a two-leg quote before enqueuing:
+
+```bash
+curl -X POST http://localhost:3000/api/intents/quote \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originAsset": "nep141:wrap.near",
+    "destinationAsset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "amount": "1000000",
+    "swapType": "EXACT_INPUT",
+    "slippageTolerance": 200,
+    "recipient": "UserSolPubKey11111111111111111111111111111",
+    "recipientType": "DESTINATION_CHAIN",
+    "refundTo": "0x2527D02599Ba641c19FEa793cD0F167589a0f10D",
+    "refundType": "ORIGIN_CHAIN",
+    "depositType": "ORIGIN_CHAIN",
+    "deadline": "2025-03-04T15:00:00Z"
+  }'
+```
+
 ### Frontend
 
 To run the frontend run:
