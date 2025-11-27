@@ -9,6 +9,7 @@ const chainSignatureContract = new contracts.ChainSignatureContract({
   contractId: config.chainSignatureContractId,
   // Provided by backend even though typings omit it
   masterPublicKey: config.chainSignatureMpcKey,
+  fallbackRpcUrls: config.nearRpcUrls,
 } as any);
 
 const solanaConnection = new Connection(config.solRpcUrl, "confirmed");

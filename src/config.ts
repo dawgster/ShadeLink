@@ -8,7 +8,25 @@ const chainSignatureNetwork =
   (process.env.NEAR_NETWORK as "mainnet" | "testnet") || "mainnet";
 export const isTestnet = chainSignatureNetwork === "testnet";
 
+// Parse NEAR RPC URLs from NEAR_RPC_JSON if provided
+function parseNearRpcUrls(): string[] {
+  const rpcJson = process.env.NEAR_RPC_JSON;
+  if (!rpcJson) return [];
+  try {
+    const parsed = JSON.parse(rpcJson);
+    if (parsed.nearRpcProviders && Array.isArray(parsed.nearRpcProviders)) {
+      return parsed.nearRpcProviders.map(
+        (p: { connectionInfo?: { url?: string } }) => p.connectionInfo?.url,
+      ).filter(Boolean);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 export const config = {
+  nearRpcUrls: parseNearRpcUrls(),
   redisUrl: process.env.REDIS_URL || "redis://127.0.0.1:6379",
   redisQueueKey: process.env.REDIS_QUEUE_KEY || "near:intents",
   redisVisibilityMs:

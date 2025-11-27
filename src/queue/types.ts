@@ -3,7 +3,12 @@ export type IntentChain = "near" | "solana" | "zcash" | "ethereum" | "arbitrum" 
 export interface KaminoDepositMetadata extends Record<string, unknown> {
   action: "kamino-deposit";
   marketAddress: string;
+  /** The mint address of the token to deposit into Kamino */
   mintAddress: string;
+  /** If true, use intents to bridge sourceAsset to the pool's target asset first */
+  useIntents?: boolean;
+  /** Slippage tolerance in basis points for the intents swap */
+  slippageTolerance?: number;
 }
 
 export interface KaminoWithdrawMetadata extends Record<string, unknown> {

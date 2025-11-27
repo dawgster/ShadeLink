@@ -4,7 +4,9 @@ import { config } from "../config";
 export type IntentStatus =
   | { state: "pending" }
   | { state: "processing"; detail?: string }
-  | { state: "succeeded"; txId: string }
+  | { state: "awaiting_deposit"; depositAddress: string; depositMemo?: string; expectedAmount?: string }
+  | { state: "awaiting_intents"; detail?: string }
+  | { state: "succeeded"; txId: string; bridgeTxId?: string }
   | { state: "failed"; error: string };
 
 const STATUS_PREFIX = "intent:status:";

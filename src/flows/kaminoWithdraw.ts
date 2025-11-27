@@ -40,6 +40,7 @@ import {
   OneClickService,
   OpenAPI,
 } from "@defuse-protocol/one-click-sdk-typescript";
+import { getDefuseAssetId, getSolDefuseAssetId } from "../utils/tokenMappings";
 
 const { uint8ArrayToHex } = utils.cryptography;
 
@@ -292,10 +293,16 @@ async function executeBridgeBack(
     OpenAPI.BASE = config.intentsQuoteUrl;
   }
 
-  const originAsset = `sol:${mintAddress}`;
+  // Convert Solana mint address to Defuse asset ID
+  // For native SOL, use the dedicated function; for SPL tokens, look up by address
+  const originAsset =
+    mintAddress === SOL_NATIVE_MINT
+      ? getSolDefuseAssetId()
+      : getDefuseAssetId("solana", mintAddress) || `nep141:${mintAddress}.omft.near`;
+
   const quoteRequest = {
     originAsset,
-    destinationAsset,
+    destinationAsset, // Caller provides this in Defuse format
     amount: withdrawnAmount,
     slippageTolerance: slippageTolerance ?? 300, // Default 3%
     dry: false, // Important: we need the deposit address

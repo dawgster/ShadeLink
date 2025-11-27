@@ -22,8 +22,14 @@ import kaminoPositions from "./routes/kaminoPositions";
 
 const app = new Hono();
 
-// Configure CORS to restrict access to the server
-app.use(cors());
+// Configure CORS - allow all origins for API access
+app.use(
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // Health check
 app.get("/", (c) => c.json({ message: "App is running" }));

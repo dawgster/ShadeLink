@@ -6,6 +6,7 @@ import { setStatus } from "../state/status";
 import { config } from "../config";
 import { fetchWithRetry } from "../utils/http";
 import { SOL_NATIVE_MINT, extractSolanaMintAddress } from "../constants";
+import { getSolDefuseAssetId } from "../utils/tokenMappings";
 import {
   OneClickService,
   OpenAPI,
@@ -78,9 +79,12 @@ app.post("/quote", async (c) => {
   // Respect dry flag from request - dry: true for preview, dry: false for execution (to get depositAddress)
   const isDryRun = payload.dry !== false;
 
+  // Two-leg swap: First swap origin asset to SOL via Intents, then SOL to final token via Jupiter
+  // Use Defuse asset ID format for the SOL destination
+  const solDefuseAssetId = getSolDefuseAssetId();
   const solQuoteRequest = {
     ...payload,
-    destinationAsset: `sol:${SOL_NATIVE_MINT}`,
+    destinationAsset: solDefuseAssetId,
     dry: isDryRun,
   };
 
