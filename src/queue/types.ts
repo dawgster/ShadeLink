@@ -3,8 +3,10 @@ export type IntentChain = "near" | "solana" | "zcash" | "ethereum" | "arbitrum" 
 export interface KaminoDepositMetadata extends Record<string, unknown> {
   action: "kamino-deposit";
   marketAddress: string;
-  /** The mint address of the token to deposit into Kamino */
+  /** The raw Solana mint address of the underlying asset */
   mintAddress: string;
+  /** The Defuse asset ID for the target asset (e.g., "1cs_v1:sol:spl:EPj...:6") */
+  targetDefuseAssetId?: string;
   /** If true, use intents to bridge sourceAsset to the pool's target asset first */
   useIntents?: boolean;
   /** Slippage tolerance in basis points for the intents swap */
@@ -58,11 +60,17 @@ export interface UserSignature {
   signature: string;
   /** The NEAR public key that signed (e.g., "ed25519:ABC...") */
   publicKey: string;
+  /** The nonce used for NEP-413 signing (base64-encoded 32 bytes) */
+  nonce: string;
+  /** The recipient used for NEP-413 signing */
+  recipient: string;
 }
 
 export interface ValidatedIntent extends IntentMessage {
   slippageBps: number;
   nearPublicKey?: string;
+  /** User's address on the source chain for refunds */
+  refundAddress?: string;
   /** User signature proving authorization for this intent */
   userSignature?: UserSignature;
 }

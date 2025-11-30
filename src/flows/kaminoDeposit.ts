@@ -233,11 +233,15 @@ async function executeIntentsSwap(
   );
   const agentSolanaAddress = agentPublicKey.toBase58();
 
-  // Convert the target mint address to Defuse asset ID
-  const destinationAsset =
-    meta.mintAddress === SOL_NATIVE_MINT
+  // Use the Defuse asset ID from metadata, or fall back to lookup
+  const destinationAsset = meta.targetDefuseAssetId
+    || (meta.mintAddress === SOL_NATIVE_MINT
       ? getSolDefuseAssetId()
-      : getDefuseAssetId("solana", meta.mintAddress) || `nep141:${meta.mintAddress}.omft.near`;
+      : getDefuseAssetId("solana", meta.mintAddress));
+
+  if (!destinationAsset) {
+    throw new Error(`Cannot determine Defuse asset ID for mint: ${meta.mintAddress}. Please provide targetDefuseAssetId in metadata.`);
+  }
 
   // The origin asset should be provided by the caller in Defuse format
   const originAsset = intent.sourceAsset;
@@ -254,7 +258,7 @@ async function executeIntentsSwap(
     dry: false, // We need the deposit address
     recipient: agentSolanaAddress,
     recipientType: "DESTINATION_CHAIN" as const,
-    refundTo: intent.nearPublicKey || intent.userDestination,
+    refundTo: intent.refundAddress || intent.userDestination,
     refundType: "ORIGIN_CHAIN" as const,
     depositType: "ORIGIN_CHAIN" as const,
     deadline,
@@ -265,14 +269,18 @@ async function executeIntentsSwap(
   const quoteResponse = await OneClickService.getQuote(quoteRequest as any);
   const quote = quoteResponse as any;
 
-  const depositAddress = quote.depositAddress;
+  console.log("[kaminoDeposit] Intents quote response", quote);
+
+  // The response may have depositAddress at the top level or nested in quote.quote
+  const innerQuote = quote.quote || quote;
+  const depositAddress = innerQuote.depositAddress || quote.depositAddress;
   if (!depositAddress) {
     throw new Error("Intents quote response missing depositAddress");
   }
 
-  const depositMemo = quote.depositMemo;
+  const depositMemo = innerQuote.depositMemo || quote.depositMemo;
   const expectedAmount =
-    quote.amountOut || quote.minAmountOut || quote.quote?.amountOut || intent.sourceAmount;
+    innerQuote.amountOut || innerQuote.minAmountOut || quote.amountOut || quote.minAmountOut || intent.sourceAmount;
 
   console.log(`[kaminoDeposit] Got intents deposit address: ${depositAddress}, memo: ${depositMemo}, expected: ${expectedAmount}`);
 

@@ -1,6 +1,6 @@
 import { setStatus } from "../state/status";
 import { RedisQueueClient } from "./redis";
-import { ValidatedIntent } from "./types";
+import { IntentMessage, ValidatedIntent } from "./types";
 import { executeSolanaSwapFlow } from "../flows/solSwap";
 import {
   executeKaminoDepositFlow,
@@ -13,35 +13,65 @@ import {
 import { validateIntent } from "./validation";
 import { config } from "../config";
 
+/**
+ * Starts the queue consumer with parallel processing support.
+ * Uses a worker pool pattern to process multiple intents concurrently.
+ */
 export async function startQueueConsumer() {
   const queue = new RedisQueueClient();
+  const concurrency = config.queueConcurrency;
+  let activeWorkers = 0;
+
+  console.log(`Starting queue consumer with concurrency: ${concurrency}`);
+
   // Fire-and-forget loop; log errors so the server keeps running.
   (async () => {
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      // Wait if we've hit max concurrency
+      if (activeWorkers >= concurrency) {
+        await delay(100);
+        continue;
+      }
+
       const next = await queue.fetchNextIntent();
       if (!next.intent || !next.raw) {
         if (next.raw) await queue.ackIntent(next.raw);
         continue;
       }
 
-      const raw = next.raw;
-      try {
-        const intent = validateIntent(next.intent);
-        await processIntentWithRetry(intent, raw, queue);
-      } catch (err) {
-        console.error("Intent processing failed", err);
-        await setStatus(next.intent.intentId, {
-          state: "failed",
-          error: (err as Error).message || "unknown error",
+      // Spawn worker for this intent (don't await - run in parallel)
+      activeWorkers++;
+      processIntent(next.intent, next.raw, queue)
+        .finally(() => {
+          activeWorkers--;
         });
-      } finally {
-        await queue.ackIntent(raw);
-      }
     }
   })().catch((err) => {
     console.error("Queue consumer crashed", err);
   });
+}
+
+/**
+ * Processes a single intent with validation, retry logic, and cleanup.
+ */
+async function processIntent(
+  intentMessage: IntentMessage,
+  raw: string,
+  queue: RedisQueueClient,
+) {
+  try {
+    const intent = validateIntent(intentMessage);
+    await processIntentWithRetry(intent, raw, queue);
+  } catch (err) {
+    console.error("Intent processing failed", err);
+    await setStatus(intentMessage.intentId, {
+      state: "failed",
+      error: (err as Error).message || "unknown error",
+    });
+  } finally {
+    await queue.ackIntent(raw);
+  }
 }
 
 async function processIntentWithRetry(

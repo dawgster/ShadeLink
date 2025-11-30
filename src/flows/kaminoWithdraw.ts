@@ -312,7 +312,7 @@ async function executeBridgeBack(
     dry: false, // Important: we need the deposit address
     recipient: destinationAddress,
     recipientType: "DESTINATION_CHAIN" as const,
-    refundTo: intent.nearPublicKey || intent.userDestination,
+    refundTo: intent.refundAddress || intent.userDestination,
     refundType: "ORIGIN_CHAIN" as const,
     depositType: "ORIGIN_CHAIN" as const,
     deadline,

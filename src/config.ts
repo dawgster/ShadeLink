@@ -74,6 +74,9 @@ export const config = {
       : process.env.ENABLE_QUEUE === "false"
         ? false
         : !isTestnet,
+  /** Number of intents to process in parallel (default: 5) */
+  queueConcurrency:
+    parseInt(process.env.QUEUE_CONCURRENCY || "", 10) || 5,
 };
 
 if (!config.shadeContractId) {
