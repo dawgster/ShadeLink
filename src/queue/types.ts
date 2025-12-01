@@ -42,11 +42,15 @@ export interface IntentMessage {
   sourceAmount: string;
   destinationChain: IntentChain;
   intermediateAsset?: string;
+  /** Amount in intermediate asset units (e.g., lamports for SOL) after first-leg swap */
+  intermediateAmount?: string;
   destinationAmount?: string;
   finalAsset: string;
   slippageBps?: number;
   userDestination: string;
   agentDestination: string;
+  /** Intents deposit address for cross-chain swaps */
+  intentsDepositAddress?: string;
   depositMemo?: string;
   originTxHash?: string;
   sessionId?: string;

@@ -53,8 +53,20 @@ export function attachSignatureToVersionedTx(
   return signed;
 }
 
-export async function broadcastSolanaTx(tx: VersionedTransaction) {
+export async function broadcastSolanaTx(tx: VersionedTransaction, skipConfirmation = false) {
   const connection = getSolanaConnection();
   const sig = await connection.sendRawTransaction(tx.serialize());
+
+  if (!skipConfirmation) {
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    const confirmation = await connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      "confirmed",
+    );
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    }
+  }
+
   return sig;
 }

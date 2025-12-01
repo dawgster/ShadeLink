@@ -31,6 +31,19 @@ export function validateIntent(message: IntentMessage): ValidatedIntent {
   if (!message.sourceAmount || !/^\d+$/.test(message.sourceAmount)) {
     throw new Error("sourceAmount must be a numeric string in base units");
   }
+  // Validate sourceAmount is a reasonable size (max 2^128 to prevent overflow issues)
+  try {
+    const amount = BigInt(message.sourceAmount);
+    if (amount <= 0n) {
+      throw new Error("sourceAmount must be positive");
+    }
+    if (amount > 2n ** 128n) {
+      throw new Error("sourceAmount exceeds maximum allowed value");
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("sourceAmount")) throw e;
+    throw new Error("sourceAmount is not a valid integer");
+  }
   // destinationAmount is optional - if provided, must be numeric string
   if (
     message.destinationAmount !== undefined &&

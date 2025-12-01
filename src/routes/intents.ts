@@ -111,13 +111,22 @@ app.post("/quote", async (c) => {
     return c.json({ error: (err as Error).message }, 502);
   }
   const baseQuote = intentsQuote.quote || {};
-  const solAmount =
+  const rawSolAmount =
     baseQuote.amountOut ||
     baseQuote.minAmountOut ||
     baseQuote.amountIn ||
     baseQuote.amount;
-  if (!solAmount) {
+  if (!rawSolAmount) {
     return c.json({ error: "Intents quote missing amountOut" }, 502);
+  }
+
+  // Ensure solAmount is a clean integer string (no decimals, scientific notation, etc.)
+  let solAmount: string;
+  try {
+    solAmount = BigInt(rawSolAmount).toString();
+  } catch (e) {
+    console.error("[intents/quote] Failed to parse solAmount as integer", { rawSolAmount });
+    return c.json({ error: `Invalid amount format from intents: ${rawSolAmount}` }, 502);
   }
 
   // Extract raw Solana mint address from asset ID (handles 1cs_v1:sol:spl:mint format)

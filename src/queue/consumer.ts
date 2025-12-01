@@ -36,7 +36,10 @@ export async function startQueueConsumer() {
 
       const next = await queue.fetchNextIntent();
       if (!next.intent || !next.raw) {
-        if (next.raw) await queue.ackIntent(next.raw);
+        if (next.raw) {
+          console.warn("[consumer] Received malformed intent message, acknowledging and skipping:", next.raw.substring(0, 200));
+          await queue.ackIntent(next.raw);
+        }
         continue;
       }
 
@@ -122,11 +125,51 @@ function delay(ms: number) {
 }
 
 /**
+ * Check if this is a cross-chain swap that needs to wait for intents delivery
+ */
+function needsIntentsWait(intent: ValidatedIntent): boolean {
+  // If intents already completed (re-queued by poller), skip waiting
+  if ((intent.metadata as any)?.intentsCompleted) {
+    return false;
+  }
+
+  // If there's a deposit address and intermediate amount, this is a cross-chain swap
+  // that needs to wait for intents to deliver funds
+  if (intent.intentsDepositAddress && intent.intermediateAmount) {
+    return true;
+  }
+
+  // If source chain is different from destination chain and we have intermediate asset
+  if (intent.sourceChain !== intent.destinationChain && intent.intermediateAsset) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Routes the intent to the appropriate execution flow based on metadata
  */
 async function executeIntentFlow(
   intent: ValidatedIntent,
 ): Promise<{ txId: string }> {
+  // Check if we need to wait for intents cross-chain swap to complete
+  if (needsIntentsWait(intent)) {
+    console.log(`[consumer] Intent ${intent.intentId} needs to wait for intents delivery`);
+
+    // Set status to awaiting_intents with all the info needed to poll and re-process
+    await setStatus(intent.intentId, {
+      state: "awaiting_intents",
+      detail: "Waiting for cross-chain swap to complete",
+      depositAddress: intent.intentsDepositAddress,
+      depositMemo: intent.depositMemo,
+      intentData: intent,
+    });
+
+    // Return a placeholder - the actual swap will happen after poller detects completion
+    return { txId: `awaiting-intents-${intent.intentId}` };
+  }
+
   if (isKaminoDepositIntent(intent)) {
     return executeKaminoDepositFlow(intent);
   }

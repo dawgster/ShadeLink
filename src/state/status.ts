@@ -1,13 +1,22 @@
 import Redis from "ioredis";
 import { config } from "../config";
+import { ValidatedIntent } from "../queue/types";
 
-export type IntentStatus =
-  | { state: "pending" }
-  | { state: "processing"; detail?: string }
-  | { state: "awaiting_deposit"; depositAddress: string; depositMemo?: string; expectedAmount?: string }
-  | { state: "awaiting_intents"; detail?: string }
-  | { state: "succeeded"; txId: string; bridgeTxId?: string }
-  | { state: "failed"; error: string };
+export type IntentState = "pending" | "processing" | "awaiting_deposit" | "awaiting_intents" | "succeeded" | "failed";
+
+export type IntentStatus = {
+  intentId?: string;
+  state: IntentState;
+  detail?: string;
+  depositAddress?: string;
+  depositMemo?: string;
+  expectedAmount?: string;
+  txId?: string;
+  bridgeTxId?: string;
+  error?: string;
+  /** Store the full intent data for re-processing after intents completes */
+  intentData?: ValidatedIntent;
+};
 
 const STATUS_PREFIX = "intent:status:";
 const STATUS_TTL_SECONDS = config.statusTtlSeconds; // keep status for one day
@@ -69,4 +78,17 @@ export async function listStatuses(
   } while (cursor !== "0" && results.length < limit);
 
   return results;
+}
+
+/**
+ * Get all intents with a specific state
+ */
+export async function getIntentsByState(
+  state: IntentState,
+  limit = 100,
+): Promise<Array<{ intentId: string } & IntentStatus>> {
+  const allStatuses = await listStatuses(limit * 2); // Fetch more since we'll filter
+  return allStatuses
+    .filter((s) => s.state === state)
+    .slice(0, limit);
 }

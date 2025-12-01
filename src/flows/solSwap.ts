@@ -1,5 +1,3 @@
-import { requestSignature } from "@neardefi/shade-agent-js";
-import { utils } from "chainsig.js";
 import { VersionedTransaction } from "@solana/web3.js";
 import { config } from "../config";
 import { extractSolanaMintAddress } from "../constants";
@@ -10,10 +8,8 @@ import {
   deriveAgentPublicKey,
   SOLANA_DEFAULT_PATH,
 } from "../utils/solana";
-import { parseSignature } from "../utils/signature";
+import { signWithNearChainSignatures } from "../utils/chainSignature";
 import { fetchWithRetry } from "../utils/http";
-
-const { uint8ArrayToHex } = utils.cryptography;
 
 interface SwapExecutionResult {
   txId: string;
@@ -29,6 +25,7 @@ export async function executeSolanaSwapFlow(
   const { transaction } = await buildJupiterSwapTransaction(intent);
   const signature = await signWithNearChainSignatures(
     transaction.message.serialize(),
+    intent.nearPublicKey,
   );
   const finalized = attachSignatureToVersionedTx(transaction, signature);
   const txId = await broadcastSolanaTx(finalized);
@@ -47,12 +44,20 @@ async function buildJupiterSwapTransaction(
   // Extract raw Solana mint addresses from asset IDs (handles 1cs_v1:sol:spl:mint format)
   const inputMint = extractSolanaMintAddress(intent.intermediateAsset || intent.sourceAsset); // asset delivered by first-leg swap (e.g. wrapped SOL)
   const outputMint = extractSolanaMintAddress(intent.finalAsset); // SPL mint address for token X
-  const amount = intent.destinationAmount || intent.sourceAmount; // amount available on destination chain for second leg
+
+  // Use intermediateAmount (SOL lamports from intents swap) for Jupiter swap input
+  // Fall back to destinationAmount or sourceAmount for backwards compatibility
+  const rawAmount = intent.intermediateAmount || intent.destinationAmount || intent.sourceAmount;
+
+  // Ensure amount is a clean integer string (no decimals, scientific notation, etc.)
+  const amount = BigInt(rawAmount).toString();
 
   const clusterParam = config.jupiterCluster
     ? `&cluster=${config.jupiterCluster}`
     : "";
   const quoteUrl = `${config.jupiterBaseUrl}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=${intent.slippageBps}${clusterParam}`;
+
+  console.log(`[solSwap] Jupiter quote request - inputMint: ${inputMint}, outputMint: ${outputMint}, amount: ${amount}, rawAmount: ${rawAmount}`);
   const quoteRes = await fetchWithRetry(
     quoteUrl,
     undefined,
@@ -97,27 +102,4 @@ async function buildJupiterSwapTransaction(
   const transaction = VersionedTransaction.deserialize(txBuffer);
 
   return { transaction, agentPublicKey: agentPublicKey.toBase58() };
-}
-
-async function signWithNearChainSignatures(
-  payloadBytes: Uint8Array,
-): Promise<Uint8Array> {
-  if (!config.shadeContractId) {
-    throw new Error("NEXT_PUBLIC_contractId not configured for signing");
-  }
-
-  const payload = uint8ArrayToHex(payloadBytes);
-  const signRes = await requestSignature({
-    path: SOLANA_DEFAULT_PATH,
-    payload,
-    keyType: "Eddsa",
-  });
-
-  if (!signRes.signature) {
-    throw new Error("Signature missing from chain-signature response");
-  }
-
-  const sig = parseSignature(signRes.signature);
-  if (!sig) throw new Error("Unsupported signature encoding");
-  return sig;
 }

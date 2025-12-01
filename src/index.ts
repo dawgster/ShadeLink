@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import dotenv from "dotenv";
 import { startQueueConsumer } from "./queue/consumer";
+import { startIntentsPoller } from "./queue/intentsPoller";
 import { config } from "./config";
 
 // Load environment variables from .env file (only needed for local development)
@@ -54,6 +55,11 @@ serve({ fetch: app.fetch, port });
 if (config.enableQueue) {
   startQueueConsumer().catch((err) => {
     console.error("Failed to start queue consumer", err);
+  });
+
+  // Start the intents poller to monitor cross-chain swaps
+  startIntentsPoller().catch((err) => {
+    console.error("Failed to start intents poller", err);
   });
 } else {
   console.log("Queue consumer disabled (enable via ENABLE_QUEUE=true)");

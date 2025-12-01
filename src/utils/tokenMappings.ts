@@ -1,4 +1,5 @@
 import tokenMappings from "./token-mappings.json";
+import { SOL_NATIVE_MINT } from "../constants";
 
 interface Deployment {
   address?: string;
@@ -46,6 +47,11 @@ export function getDefuseAssetId(
 ): string | null {
   const normalizedSymbol = symbolOrAddress.toUpperCase();
   const normalizedChain = chainName.toLowerCase();
+
+  // Special case: Native SOL mint address should return the SOL Defuse asset ID
+  if (normalizedChain === "solana" && symbolOrAddress === SOL_NATIVE_MINT) {
+    return getSolDefuseAssetId();
+  }
 
   for (const token of mappings.tokens) {
     // Check if symbol matches

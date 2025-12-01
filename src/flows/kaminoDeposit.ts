@@ -1,5 +1,3 @@
-import { requestSignature } from "@neardefi/shade-agent-js";
-import { utils } from "chainsig.js";
 import {
   VersionedTransaction,
   Connection,
@@ -9,11 +7,6 @@ import {
 import {
   createSolanaRpc,
   address,
-  createKeyPairSignerFromBytes,
-  getBase58Decoder,
-  getBase64Encoder,
-  compileTransaction,
-  getCompiledTransactionMessageEncoder,
 } from "@solana/kit";
 import {
   KaminoAction,
@@ -30,7 +23,10 @@ import {
   deriveAgentPublicKey,
   SOLANA_DEFAULT_PATH,
 } from "../utils/solana";
-import { parseSignature } from "../utils/signature";
+import {
+  signWithNearChainSignatures,
+  createDummySigner,
+} from "../utils/chainSignature";
 import {
   createIntentSigningMessage,
   validateIntentSignature,
@@ -43,8 +39,6 @@ import { getDefuseAssetId, getSolDefuseAssetId } from "../utils/tokenMappings";
 import { SOL_NATIVE_MINT } from "../constants";
 import { getTokenBalance, waitForTokenBalance } from "../utils/solanaBalance";
 import { setStatus } from "../state/status";
-
-const { uint8ArrayToHex } = utils.cryptography;
 
 // How long to wait for intents to deliver tokens (15 minutes)
 const INTENTS_TIMEOUT_MS = 15 * 60 * 1000;
@@ -162,7 +156,10 @@ export async function executeKaminoDepositFlow(
     console.log(`[kaminoDeposit] Waiting for tokens to arrive at ${agentSolanaAddress}...`);
 
     // Wait for balance to increase by at least the expected amount (with some tolerance for slippage)
-    const minExpectedBalance = balanceBefore + (expectedAmount * BigInt(97)) / BigInt(100); // Allow 3% slippage
+    // Use the user's slippage tolerance from metadata, default to 3% (300 bps)
+    const slippageBps = meta.slippageTolerance ?? 300;
+    const slippageMultiplier = BigInt(10000 - slippageBps);
+    const minExpectedBalance = balanceBefore + (expectedAmount * slippageMultiplier) / BigInt(10000);
 
     const actualBalance = await waitForTokenBalance(
       agentSolanaAddress,
@@ -344,39 +341,19 @@ async function buildKaminoDepositTransaction(
     ...depositAction.cleanupIxs,
   ];
 
-  // Get recent blockhash using kit RPC
-  const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
-
-  // Compile the transaction message using @solana/kit
-  const transactionMessage = {
-    version: 0 as const,
-    header: {
-      numSignerAccounts: 1,
-      numReadonlySignerAccounts: 0,
-      numReadonlyNonSignerAccounts: 0,
-    },
-    staticAccounts: [] as string[],
-    lifetimeToken: latestBlockhash.blockhash,
-    instructions,
-    addressTableLookups: [],
-  };
-
-  const compiledTx = compileTransaction(transactionMessage as any);
-  const encoder = getCompiledTransactionMessageEncoder();
-  const serializedMessage = encoder.encode(compiledTx.messageBytes as any);
-
   // For broadcasting via @solana/web3.js, we need to convert the transaction
-  // Re-fetch the blockhash and build with web3.js types for compatibility
   const connection = new Connection(config.solRpcUrl, "confirmed");
   const { blockhash } = await connection.getLatestBlockhash();
 
   // Convert kit instructions to web3.js instructions
+  // AccountRole values from @solana/instructions:
+  // READONLY = 0, WRITABLE = 1, READONLY_SIGNER = 2, WRITABLE_SIGNER = 3
   const web3Instructions = instructions.map((ix: any) => ({
     programId: new PublicKey(ix.programAddress),
     keys: ix.accounts.map((acc: any) => ({
       pubkey: new PublicKey(acc.address),
-      isSigner: acc.role === 3 || acc.role === 2, // SIGNER or SIGNER_WRITABLE
-      isWritable: acc.role === 1 || acc.role === 3, // WRITABLE or SIGNER_WRITABLE
+      isSigner: acc.role === 2 || acc.role === 3, // READONLY_SIGNER or WRITABLE_SIGNER
+      isWritable: acc.role === 1 || acc.role === 3, // WRITABLE or WRITABLE_SIGNER
     })),
     data: Buffer.from(ix.data),
   }));
@@ -390,46 +367,4 @@ async function buildKaminoDepositTransaction(
   const transaction = new VersionedTransaction(messageV0);
 
   return { transaction, serializedMessage: transaction.message.serialize() };
-}
-
-async function createDummySigner(ownerAddress: string) {
-  // Create a minimal signer interface that only provides the address
-  // The actual signing happens via NEAR chain signatures
-  return {
-    address: ownerAddress,
-    signTransactions: async () => {
-      throw new Error("Signing handled by NEAR chain signatures");
-    },
-    signMessages: async () => {
-      throw new Error("Signing handled by NEAR chain signatures");
-    },
-  } as any;
-}
-
-async function signWithNearChainSignatures(
-  payloadBytes: Uint8Array,
-  nearPublicKey?: string,
-): Promise<Uint8Array> {
-  if (!config.shadeContractId) {
-    throw new Error("NEXT_PUBLIC_contractId not configured for signing");
-  }
-
-  const derivationPath = nearPublicKey
-    ? `${SOLANA_DEFAULT_PATH},${nearPublicKey}`
-    : SOLANA_DEFAULT_PATH;
-
-  const payload = uint8ArrayToHex(payloadBytes);
-  const signRes = await requestSignature({
-    path: derivationPath,
-    payload,
-    keyType: "Eddsa",
-  });
-
-  if (!signRes.signature) {
-    throw new Error("Signature missing from chain-signature response");
-  }
-
-  const sig = parseSignature(signRes.signature);
-  if (!sig) throw new Error("Unsupported signature encoding");
-  return sig;
 }
