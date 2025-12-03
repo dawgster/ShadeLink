@@ -1,8 +1,8 @@
 import { config } from "../config";
 import { BurrowDepositMetadata, ValidatedIntent } from "../queue/types";
 import {
-  BURROW_CONTRACT,
   getAssetsPagedDetailed,
+  buildSupplyTransaction,
 } from "../utils/burrow";
 import {
   createIntentSigningMessage,
@@ -113,51 +113,20 @@ export async function executeBurrowDepositFlow(
     throw new Error(`Token ${meta.tokenId} cannot be used as collateral`);
   }
 
-  // Get extra decimals for amount adjustment
-  const extraDecimals = asset.config.extra_decimals;
+  // Build the supply transaction using Rhea SDK
+  const supplyTx = await buildSupplyTransaction({
+    token_id: meta.tokenId,
+    amount: depositAmount,
+    is_collateral: meta.isCollateral ?? false,
+  });
 
-  // Build the deposit transaction
-  // For Burrow deposits, we call ft_transfer_call on the token contract
-  // with a message specifying the action
-
-  let msg: string;
-  if (meta.isCollateral) {
-    // Deposit as collateral
-    const maxAmount = (BigInt(depositAmount) * BigInt(10 ** extraDecimals)).toString();
-    msg = JSON.stringify({
-      Execute: {
-        actions: [
-          {
-            IncreaseCollateral: {
-              token_id: meta.tokenId,
-              max_amount: maxAmount,
-            },
-          },
-        ],
-      },
-    });
-  } else {
-    // Regular deposit (supply)
-    msg = JSON.stringify({
-      Execute: {
-        actions: [
-          {
-            Deposit: {},
-          },
-        ],
-      },
-    });
-  }
+  console.log(`[burrowDeposit] Built supply tx via Rhea SDK: ${supplyTx.method_name} on ${supplyTx.contract_id}`);
 
   const actions: NearAction[] = [
     {
       type: "FunctionCall",
-      methodName: "ft_transfer_call",
-      args: JSON.stringify({
-        receiver_id: BURROW_CONTRACT,
-        amount: depositAmount,
-        msg,
-      }),
+      methodName: supplyTx.method_name,
+      args: JSON.stringify(supplyTx.args),
       gas: GAS_FOR_FT_TRANSFER_CALL,
       deposit: ONE_YOCTO,
     },
@@ -171,7 +140,7 @@ export async function executeBurrowDepositFlow(
     signerId: nearAccountId,
     publicKey: derivedPublicKey,
     nonce: accessKeyInfo.nonce + 1,
-    receiverId: meta.tokenId, // Token contract is the receiver
+    receiverId: supplyTx.contract_id, // Token contract from SDK response
     blockHash: accessKeyInfo.block_hash,
     actions,
   });

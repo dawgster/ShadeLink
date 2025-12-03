@@ -47,16 +47,28 @@ export interface BurrowAssetDetailed {
   supply_apr: string;
   borrow_apr: string;
   farms: BurrowFarm[];
+  // Additional fields from Rhea SDK
+  beneficiary_fees?: Record<string, string>;
+  margin_debt?: {
+    balance: string;
+    shares: string;
+  };
+  margin_pending_debt?: string;
+  margin_position?: string;
+  lostfound_shares?: string;
+  uahpi?: string;
+}
+
+export interface BurrowFarmReward {
+  reward_per_day: string;
+  booster_log_bases?: Record<string, string>;
+  remaining_rewards: string;
+  boosted_shares: string;
 }
 
 export interface BurrowFarm {
-  farm_id: { Supplied?: string; Borrowed?: string };
-  rewards: Record<string, {
-    reward_per_day: string;
-    booster_log_base: string;
-    remaining_rewards: string;
-    boosted_shares: string;
-  }>;
+  farm_id: { Supplied?: string; Borrowed?: string; TokenNetBalance?: string };
+  rewards: Record<string, BurrowFarmReward>;
 }
 
 export interface BurrowAccountSupplied {
@@ -121,23 +133,56 @@ export interface BurrowPriceData {
   }>;
 }
 
-// View methods for Burrow contract
+// Rhea Finance SDK base URL
+const RHEA_SDK_BASE_URL = "https://lendingsdk.rhea.finance";
 
+interface RheaSdkResponse {
+  code: string;
+  data: BurrowAssetDetailed[];
+  msg: string;
+}
+
+// Fetch market data from Rhea Finance SDK
 export async function getAssetsPagedDetailed(): Promise<BurrowAssetDetailed[]> {
-  return nearViewCall<BurrowAssetDetailed[]>(
-    BURROW_CONTRACT,
-    "get_assets_paged_detailed",
-    {},
-  );
+  const response = await fetch(`${RHEA_SDK_BASE_URL}/get_assets_paged_detailed`);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Burrow markets from Rhea SDK: ${response.status}`);
+  }
+
+  const result: RheaSdkResponse = await response.json();
+
+  if (result.code !== "0" || result.msg !== "success") {
+    throw new Error(`Rhea SDK error: ${result.msg}`);
+  }
+
+  return result.data;
+}
+
+interface RheaAccountResponse {
+  code: string;
+  msg: string;
+  data: BurrowAccount | null;
 }
 
 export async function getBurrowAccount(accountId: string): Promise<BurrowAccount | null> {
   try {
-    return await nearViewCall<BurrowAccount>(
-      BURROW_CONTRACT,
-      "get_account",
-      { account_id: accountId },
-    );
+    const response = await fetch(`${RHEA_SDK_BASE_URL}/get_account/${accountId}`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      throw new Error(`Failed to fetch account: ${response.status}`);
+    }
+
+    const result: RheaAccountResponse = await response.json();
+
+    if (result.code !== "0") {
+      return null;
+    }
+
+    return result.data;
   } catch {
     return null;
   }
@@ -154,6 +199,11 @@ export async function getPriceData(): Promise<BurrowPriceData> {
     "get_price_data",
     {},
   );
+}
+
+// Convert APR (decimal) to APY (decimal) with daily compounding
+function aprToApy(apr: number): number {
+  return Math.pow(1 + apr / 365, 365) - 1;
 }
 
 // Helper to calculate token price from oracle data
@@ -225,8 +275,8 @@ export async function listBurrowMarkets(): Promise<BurrowMarket[]> {
         symbol: metadata.symbol,
         decimals: tokenDecimals,
         price,
-        supplyApy: parseFloat(asset.supply_apr) * 100,
-        borrowApy: parseFloat(asset.borrow_apr) * 100,
+        supplyApy: aprToApy(parseFloat(asset.supply_apr)) * 100,
+        borrowApy: aprToApy(parseFloat(asset.borrow_apr)) * 100,
         totalSupplied: totalSupplied.toString(),
         totalSuppliedUsd: totalSuppliedNum * price,
         totalBorrowed: totalBorrowed.toString(),
@@ -383,4 +433,100 @@ export async function getExtraDecimals(tokenId: string): Promise<number> {
   const assets = await getAssetsPagedDetailed();
   const asset = assets.find((a) => a.token_id === tokenId);
   return asset?.config.extra_decimals || 0;
+}
+
+export interface RheaSupplyRequest {
+  token_id: string;
+  amount: string;
+  is_collateral: boolean;
+}
+
+export interface RheaSupplyResponse {
+  code: string;
+  msg: string;
+  data: {
+    amount: number;
+    args: {
+      amount: string;
+      msg: string;
+      receiver_id: string;
+    };
+    contract_id: string;
+    method_name: string;
+  };
+}
+
+export async function buildSupplyTransaction(
+  request: RheaSupplyRequest,
+): Promise<RheaSupplyResponse["data"]> {
+  const response = await fetch(`${RHEA_SDK_BASE_URL}/supply`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to build supply transaction: ${response.status}`);
+  }
+
+  const result: RheaSupplyResponse = await response.json();
+
+  if (result.code !== "0" || result.msg !== "success") {
+    throw new Error(`Rhea SDK supply error: ${result.msg}`);
+  }
+
+  return result.data;
+}
+
+export interface RheaWithdrawRequest {
+  token_id: string;
+  amount: string;
+}
+
+export interface RheaWithdrawResponse {
+  code: string;
+  msg: string;
+  data: {
+    amount: number;
+    args: {
+      actions: Array<{
+        Withdraw?: {
+          token_id: string;
+          max_amount: string;
+        };
+        DecreaseCollateral?: {
+          token_id: string;
+          max_amount: string;
+        };
+      }>;
+    };
+    contract_id: string;
+    method_name: string;
+  };
+}
+
+export async function buildWithdrawTransaction(
+  request: RheaWithdrawRequest,
+): Promise<RheaWithdrawResponse["data"]> {
+  const response = await fetch(`${RHEA_SDK_BASE_URL}/withdraw`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to build withdraw transaction: ${response.status}`);
+  }
+
+  const result: RheaWithdrawResponse = await response.json();
+
+  if (result.code !== "0" || result.msg !== "success") {
+    throw new Error(`Rhea SDK withdraw error: ${result.msg}`);
+  }
+
+  return result.data;
 }

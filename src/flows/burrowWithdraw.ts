@@ -1,9 +1,8 @@
 import { config } from "../config";
 import { BurrowWithdrawMetadata, ValidatedIntent } from "../queue/types";
 import {
-  BURROW_CONTRACT,
   getAssetsPagedDetailed,
-  getBurrowAccount,
+  buildWithdrawTransaction,
 } from "../utils/burrow";
 import {
   createIntentSigningMessage,
@@ -101,60 +100,21 @@ export async function executeBurrowWithdrawFlow(
     throw new Error(`Token ${meta.tokenId} cannot be withdrawn from Burrow`);
   }
 
-  const extraDecimals = asset.config.extra_decimals;
   const withdrawAmount = intent.sourceAmount;
 
-  // Calculate max_amount with extra decimals
-  const maxAmount = (BigInt(withdrawAmount) * BigInt(10 ** extraDecimals)).toString();
-
-  // Check if user needs to decrease collateral
-  // This is determined by checking supplied vs collateral balances
-  const account = await getBurrowAccount(nearAccountId);
-  let decreaseAmount = "0";
-
-  if (account) {
-    const supplied = account.supplied.find((s) => s.token_id === meta.tokenId);
-    const suppliedBalance = BigInt(supplied?.balance || "0");
-
-    if (BigInt(maxAmount) > suppliedBalance) {
-      decreaseAmount = (BigInt(maxAmount) - suppliedBalance).toString();
-    }
-  }
-
-  // Build the withdraw action
-  // If we need to decrease collateral, we need to call oracle_call or execute_with_pyth
-  // For simplicity, using the execute method first
-  let methodName = "execute";
-
-  const actions: any[] = [];
-
-  // If we need to decrease collateral first
-  if (BigInt(decreaseAmount) > 0n) {
-    actions.push({
-      DecreaseCollateral: {
-        token_id: meta.tokenId,
-        max_amount: decreaseAmount,
-      },
-    });
-  }
-
-  // Add withdraw action
-  actions.push({
-    Withdraw: {
-      token_id: meta.tokenId,
-      max_amount: maxAmount,
-    },
+  // Build the withdraw transaction using Rhea SDK
+  const withdrawTx = await buildWithdrawTransaction({
+    token_id: meta.tokenId,
+    amount: withdrawAmount,
   });
 
-  const executeArgs = JSON.stringify({
-    actions,
-  });
+  console.log(`[burrowWithdraw] Built withdraw tx via Rhea SDK: ${withdrawTx.method_name} on ${withdrawTx.contract_id}`);
 
   const txActions: NearAction[] = [
     {
       type: "FunctionCall",
-      methodName,
-      args: executeArgs,
+      methodName: withdrawTx.method_name,
+      args: JSON.stringify(withdrawTx.args),
       gas: GAS_FOR_EXECUTE,
       deposit: ZERO_DEPOSIT,
     },
@@ -168,7 +128,7 @@ export async function executeBurrowWithdrawFlow(
     signerId: nearAccountId,
     publicKey: derivedPublicKey,
     nonce: accessKeyInfo.nonce + 1,
-    receiverId: BURROW_CONTRACT,
+    receiverId: withdrawTx.contract_id, // Burrow contract from SDK response
     blockHash: accessKeyInfo.block_hash,
     actions: txActions,
   });

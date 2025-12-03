@@ -26,11 +26,20 @@ export function getSolanaConnection() {
 export async function deriveAgentPublicKey(
   path = SOLANA_DEFAULT_PATH,
   nearPublicKey?: string,
+  userDestination?: string,
 ) {
   const accountId = config.shadeContractId;
   if (!accountId) throw new Error("NEXT_PUBLIC_contractId not configured");
 
-  const derivationPath = nearPublicKey ? `${path},${nearPublicKey}` : path;
+  // Build derivation path including user identifiers for custody isolation
+  // Each unique user gets their own derived agent account
+  let derivationPath = path;
+  if (nearPublicKey) {
+    derivationPath = `${derivationPath},${nearPublicKey}`;
+  }
+  if (userDestination) {
+    derivationPath = `${derivationPath},${userDestination}`;
+  }
 
   const { publicKey } = await SolanaAdapter.deriveAddressAndPublicKey(
     accountId,

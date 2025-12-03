@@ -111,10 +111,11 @@ export async function executeKaminoDepositFlow(
     return result;
   }
 
-  // Get the agent's Solana address
+  // Get the agent's Solana address with userDestination in path for custody isolation
   const agentPublicKey = await deriveAgentPublicKey(
     SOLANA_DEFAULT_PATH,
     intent.nearPublicKey,
+    intent.userDestination,
   );
   const agentSolanaAddress = agentPublicKey.toBase58();
 
@@ -189,9 +190,11 @@ export async function executeKaminoDepositFlow(
     intent,
     depositAmount,
   );
+  // Sign with derivation path that includes userDestination for custody isolation
   const signature = await signWithNearChainSignatures(
     serializedMessage,
     intent.nearPublicKey,
+    intent.userDestination,
   );
   const finalized = attachSignatureToVersionedTx(transaction, signature);
   const txId = await broadcastSolanaTx(finalized);
@@ -224,9 +227,11 @@ async function executeIntentsSwap(
   }
 
   // Get the agent's Solana address where intents will deliver the swapped tokens
+  // Include userDestination in path for custody isolation
   const agentPublicKey = await deriveAgentPublicKey(
     SOLANA_DEFAULT_PATH,
     intent.nearPublicKey,
+    intent.userDestination,
   );
   const agentSolanaAddress = agentPublicKey.toBase58();
 
@@ -295,9 +300,11 @@ async function buildKaminoDepositTransaction(
   const rpc = createKaminoRpc();
   const meta = intent.metadata as KaminoDepositMetadata;
 
+  // Include userDestination in path for custody isolation
   const agentPublicKey = await deriveAgentPublicKey(
     SOLANA_DEFAULT_PATH,
     intent.nearPublicKey,
+    intent.userDestination,
   );
   const ownerAddress = address(agentPublicKey.toBase58());
 

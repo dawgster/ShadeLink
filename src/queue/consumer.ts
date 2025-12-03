@@ -100,6 +100,13 @@ async function processIntentWithRetry(
       });
 
       const result = await executeIntentFlow(intent);
+
+      // If the intent is awaiting intents delivery, don't overwrite the status
+      // The poller will handle the next step when intents completes
+      if (result.txId.startsWith("awaiting-intents-")) {
+        return;
+      }
+
       await setStatus(intent.intentId, {
         state: "succeeded",
         txId: result.txId,

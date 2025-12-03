@@ -109,9 +109,11 @@ export async function executeKaminoWithdrawFlow(
 
   // Step 1: Execute Kamino withdrawal
   const { transaction, serializedMessage } = await buildKaminoWithdrawTransaction(intent);
+  // Sign with derivation path that includes userDestination for custody isolation
   const signature = await signWithNearChainSignatures(
     serializedMessage,
     intent.nearPublicKey,
+    intent.userDestination,
   );
   const finalized = attachSignatureToVersionedTx(transaction, signature);
   const txId = await broadcastSolanaTx(finalized);
@@ -137,9 +139,11 @@ async function buildKaminoWithdrawTransaction(
   const rpc = createKaminoRpc();
   const meta = intent.metadata as KaminoWithdrawMetadata;
 
+  // Include userDestination in path for custody isolation
   const agentPublicKey = await deriveAgentPublicKey(
     SOLANA_DEFAULT_PATH,
     intent.nearPublicKey,
+    intent.userDestination,
   );
   const ownerAddress = address(agentPublicKey.toBase58());
 
@@ -288,9 +292,11 @@ async function executeBridgeBack(
   console.log(`[kaminoWithdraw] Got intents deposit address: ${depositAddress}`);
 
   // Step 2: Build transaction to send tokens to the deposit address
+  // Include userDestination in path for custody isolation
   const agentPublicKey = await deriveAgentPublicKey(
     SOLANA_DEFAULT_PATH,
     intent.nearPublicKey,
+    intent.userDestination,
   );
 
   const connection = new Connection(config.solRpcUrl, "confirmed");
@@ -359,10 +365,11 @@ async function executeBridgeBack(
 
     const transaction = new VersionedTransaction(messageV0);
 
-    // Sign and broadcast
+    // Sign and broadcast with userDestination in derivation path
     const signature = await signWithNearChainSignatures(
       transaction.message.serialize(),
       intent.nearPublicKey,
+      intent.userDestination,
     );
     const finalized = attachSignatureToVersionedTx(transaction, signature);
     const txId = await broadcastSolanaTx(finalized);
@@ -381,10 +388,11 @@ async function executeBridgeBack(
 
   const transaction = new VersionedTransaction(messageV0);
 
-  // Sign and broadcast
+  // Sign and broadcast with userDestination in derivation path
   const signature = await signWithNearChainSignatures(
     transaction.message.serialize(),
     intent.nearPublicKey,
+    intent.userDestination,
   );
   const finalized = attachSignatureToVersionedTx(transaction, signature);
   const txId = await broadcastSolanaTx(finalized);

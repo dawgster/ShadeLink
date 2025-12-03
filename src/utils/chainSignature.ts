@@ -98,29 +98,48 @@ function base58Decode(str: string): Uint8Array {
  * Signs a payload using NEAR chain signatures (EdDSA for Solana).
  * @param payloadBytes - The serialized transaction message to sign
  * @param nearPublicKey - Optional NEAR public key to include in derivation path
+ * @param userDestination - Optional user destination address for custody isolation
  * @returns The signature as Uint8Array
  */
 export async function signWithNearChainSignatures(
   payloadBytes: Uint8Array,
   nearPublicKey?: string,
+  userDestination?: string,
 ): Promise<Uint8Array> {
   if (!config.shadeContractId) {
     throw new Error("NEXT_PUBLIC_contractId not configured for signing");
   }
 
-  const derivationPath = nearPublicKey
-    ? `${SOLANA_DEFAULT_PATH},${nearPublicKey}`
-    : SOLANA_DEFAULT_PATH;
+  // Build derivation path including user identifiers for custody isolation
+  let derivationPath = SOLANA_DEFAULT_PATH;
+  if (nearPublicKey) {
+    derivationPath = `${derivationPath},${nearPublicKey}`;
+  }
+  if (userDestination) {
+    derivationPath = `${derivationPath},${userDestination}`;
+  }
 
   const payload = uint8ArrayToHex(payloadBytes);
+  console.log("[chainSignature] Requesting signature", {
+    path: derivationPath,
+    payloadLength: payloadBytes.length,
+    keyType: "Eddsa",
+  });
+
   const signRes = await requestSignature({
     path: derivationPath,
     payload,
     keyType: "Eddsa",
   });
 
+  console.log("[chainSignature] Signature response", {
+    hasSignature: !!signRes?.signature,
+    responseKeys: signRes ? Object.keys(signRes) : [],
+    response: JSON.stringify(signRes).slice(0, 500),
+  });
+
   if (!signRes.signature) {
-    throw new Error("Signature missing from chain-signature response");
+    throw new Error(`Signature missing from chain-signature response: ${JSON.stringify(signRes)}`);
   }
 
   const sig = parseSignature(signRes.signature);

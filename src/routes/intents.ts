@@ -148,6 +148,18 @@ app.post("/quote", async (c) => {
   // Extract custom fields that should NOT be sent to the Defuse API
   const { sourceChain, userDestination, metadata, kaminoDeposit, ...defuseQuoteFields } = payload;
 
+  // Derive the agent's Solana address for the 1-Click recipient
+  // Include userDestination in derivation path for custody isolation
+  let agentSolanaAddress: string | undefined;
+  if (userDestination) {
+    const agentPubkey = await deriveAgentPublicKey(
+      undefined,
+      payload.kaminoDeposit?.nearPublicKey,
+      userDestination,
+    );
+    agentSolanaAddress = agentPubkey.toBase58();
+  }
+
   // Two-leg swap: First swap origin asset to SOL via Intents, then SOL to final token via Jupiter
   // Use Defuse asset ID format for the SOL destination
   const solDefuseAssetId = getSolDefuseAssetId();
@@ -155,6 +167,11 @@ app.post("/quote", async (c) => {
     ...defuseQuoteFields,
     destinationAsset: solDefuseAssetId,
     dry: isDryRun,
+    // Set recipient to the derived agent address so 1-Click delivers SOL there
+    ...(agentSolanaAddress && {
+      recipient: agentSolanaAddress,
+      recipientType: "DESTINATION_CHAIN" as const,
+    }),
   };
 
   if (config.intentsQuoteUrl) {
@@ -168,6 +185,7 @@ app.post("/quote", async (c) => {
     slippageTolerance: payload.slippageTolerance,
     dry: isDryRun,
     intentsQuoteUrl: OpenAPI.BASE,
+    agentRecipient: agentSolanaAddress,
   });
 
   let intentsQuote: IntentsQuoteResponse;
@@ -247,12 +265,9 @@ app.post("/quote", async (c) => {
     }
 
     try {
-      // Derive the agent's Solana public key for agentDestination
-      // For Kamino deposits, use the user's nearPublicKey for derivation
-      const agentPubkey = payload.kaminoDeposit?.nearPublicKey
-        ? await deriveAgentPublicKey(undefined, payload.kaminoDeposit.nearPublicKey)
-        : await deriveAgentPublicKey();
-      const agentDestination = agentPubkey.toBase58();
+      // Use the agent address we derived earlier for the 1-Click recipient
+      // This ensures the same address is used for delivery and signing
+      const agentDestination = agentSolanaAddress!;
 
       // Build metadata - include Kamino-specific fields if present
       let intentMetadata = payload.metadata || {};
