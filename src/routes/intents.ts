@@ -145,11 +145,14 @@ app.post("/quote", async (c) => {
   // Respect dry flag from request - dry: true for preview, dry: false for execution (to get depositAddress)
   const isDryRun = payload.dry !== false;
 
+  // Extract custom fields that should NOT be sent to the Defuse API
+  const { sourceChain, userDestination, metadata, kaminoDeposit, ...defuseQuoteFields } = payload;
+
   // Two-leg swap: First swap origin asset to SOL via Intents, then SOL to final token via Jupiter
   // Use Defuse asset ID format for the SOL destination
   const solDefuseAssetId = getSolDefuseAssetId();
   const solQuoteRequest = {
-    ...payload,
+    ...defuseQuoteFields,
     destinationAsset: solDefuseAssetId,
     dry: isDryRun,
   };
