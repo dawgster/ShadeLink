@@ -1,10 +1,98 @@
 import { requestSignature } from "@neardefi/shade-agent-js";
-import { utils } from "chainsig.js";
+import { contracts, utils } from "chainsig.js";
 import { config } from "../config";
 import { parseSignature } from "./signature";
 import { SOLANA_DEFAULT_PATH } from "./solana";
 
 const { uint8ArrayToHex } = utils.cryptography;
+
+export const NEAR_DEFAULT_PATH = "near-1";
+
+const chainSignatureContract = new contracts.ChainSignatureContract({
+  networkId: config.chainSignatureNetwork as "mainnet" | "testnet",
+  contractId: config.chainSignatureContractId,
+  masterPublicKey: config.chainSignatureMpcKey,
+  fallbackRpcUrls: config.nearRpcUrls,
+} as any);
+
+/**
+ * Derives a NEAR implicit account address from the chain signature MPC.
+ * The implicit account ID is the hex-encoded 32-byte ed25519 public key.
+ *
+ * @param path - Derivation path (default: "near-1")
+ * @param nearPublicKey - Optional NEAR public key to include in derivation
+ * @returns The derived NEAR implicit account ID and public key in ed25519:... format
+ */
+export async function deriveNearImplicitAccount(
+  path = NEAR_DEFAULT_PATH,
+  nearPublicKey?: string,
+): Promise<{ accountId: string; publicKey: string }> {
+  const accountId = config.shadeContractId;
+  if (!accountId) throw new Error("NEXT_PUBLIC_contractId not configured");
+
+  const derivationPath = nearPublicKey ? `${path},${nearPublicKey}` : path;
+
+  // Derive the ed25519 public key from the MPC
+  const derivedKey = await chainSignatureContract.getDerivedPublicKey({
+    path: derivationPath,
+    predecessor: accountId,
+  });
+
+  // Parse the derived key - expecting ed25519 format
+  if (typeof derivedKey !== "string" || !derivedKey.startsWith("ed25519:")) {
+    throw new Error(`Expected ed25519 key, got: ${derivedKey}`);
+  }
+
+  // Decode the base58 public key to get raw bytes
+  const keyBase58 = derivedKey.slice(8); // Remove "ed25519:" prefix
+  const keyBytes = base58Decode(keyBase58);
+
+  if (keyBytes.length !== 32) {
+    throw new Error(`Expected 32-byte ed25519 key, got ${keyBytes.length} bytes`);
+  }
+
+  // NEAR implicit account ID is the hex-encoded 32-byte public key
+  const implicitAccountId = Buffer.from(keyBytes).toString("hex");
+
+  return {
+    accountId: implicitAccountId,
+    publicKey: derivedKey,
+  };
+}
+
+// Base58 decode helper
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function base58Decode(str: string): Uint8Array {
+  const bytes: number[] = [];
+  let value = BigInt(0);
+
+  for (const char of str) {
+    const index = BASE58_ALPHABET.indexOf(char);
+    if (index === -1) {
+      throw new Error(`Invalid base58 character: ${char}`);
+    }
+    value = value * BigInt(58) + BigInt(index);
+  }
+
+  while (value > 0n) {
+    bytes.unshift(Number(value & 0xffn));
+    value = value >> 8n;
+  }
+
+  // Handle leading zeros (1s in base58)
+  for (const char of str) {
+    if (char !== "1") break;
+    bytes.unshift(0);
+  }
+
+  // Pad to 32 bytes if needed
+  while (bytes.length < 32) {
+    bytes.unshift(0);
+  }
+
+  return new Uint8Array(bytes);
+}
 
 /**
  * Signs a payload using NEAR chain signatures (EdDSA for Solana).

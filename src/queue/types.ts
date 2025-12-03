@@ -30,9 +30,42 @@ export interface KaminoWithdrawMetadata extends Record<string, unknown> {
   };
 }
 
+export interface BurrowDepositMetadata extends Record<string, unknown> {
+  action: "burrow-deposit";
+  /** The NEAR token contract address (e.g., "wrap.near", "usdc.token.near") */
+  tokenId: string;
+  /** Whether to use deposited tokens as collateral */
+  isCollateral?: boolean;
+  /** If true, use intents to bridge sourceAsset to the target token first */
+  useIntents?: boolean;
+  /** The Defuse asset ID for the target NEAR token */
+  targetDefuseAssetId?: string;
+  /** Slippage tolerance in basis points for the intents swap */
+  slippageTolerance?: number;
+}
+
+export interface BurrowWithdrawMetadata extends Record<string, unknown> {
+  action: "burrow-withdraw";
+  /** The NEAR token contract address (e.g., "wrap.near", "usdc.token.near") */
+  tokenId: string;
+  /** Optional: bridge withdrawn tokens back to another chain via intents */
+  bridgeBack?: {
+    /** Destination chain for the bridge (e.g., "zcash", "ethereum") */
+    destinationChain: string;
+    /** User's address on the destination chain */
+    destinationAddress: string;
+    /** Destination asset identifier (e.g., "zec:zec") */
+    destinationAsset: string;
+    /** Optional slippage tolerance in basis points */
+    slippageTolerance?: number;
+  };
+}
+
 export type IntentMetadata =
   | KaminoDepositMetadata
   | KaminoWithdrawMetadata
+  | BurrowDepositMetadata
+  | BurrowWithdrawMetadata
   | Record<string, unknown>;
 
 export interface IntentMessage {

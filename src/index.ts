@@ -20,6 +20,7 @@ import chainsigTest from "./routes/chainsigTest";
 import intents from "./routes/intents";
 import solAccount from "./routes/solAccount";
 import kaminoPositions from "./routes/kaminoPositions";
+import burrowPositions from "./routes/burrowPositions";
 
 const app = new Hono();
 
@@ -44,6 +45,7 @@ app.route("/api/chainsig-test", chainsigTest);
 app.route("/api/intents", intents);
 app.route("/api/sol-account", solAccount);
 app.route("/api/kamino-positions", kaminoPositions);
+app.route("/api/burrow-positions", burrowPositions);
 
 // Start the server
 const port = Number(process.env.PORT || "3000");

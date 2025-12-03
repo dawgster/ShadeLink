@@ -1,5 +1,8 @@
 export const SOL_NATIVE_MINT = "So11111111111111111111111111111111111111112";
 
+// NEAR wrapped token contract (used as intermediate asset for NEAR-based intents)
+export const WRAP_NEAR_CONTRACT = "wrap.near";
+
 /**
  * Extracts the Solana mint address from various asset ID formats.
  * Supports:

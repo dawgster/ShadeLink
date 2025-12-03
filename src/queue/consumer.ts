@@ -10,6 +10,14 @@ import {
   executeKaminoWithdrawFlow,
   isKaminoWithdrawIntent,
 } from "../flows/kaminoWithdraw";
+import {
+  executeBurrowDepositFlow,
+  isBurrowDepositIntent,
+} from "../flows/burrowDeposit";
+import {
+  executeBurrowWithdrawFlow,
+  isBurrowWithdrawIntent,
+} from "../flows/burrowWithdraw";
 import { validateIntent } from "./validation";
 import { config } from "../config";
 
@@ -176,6 +184,14 @@ async function executeIntentFlow(
 
   if (isKaminoWithdrawIntent(intent)) {
     return executeKaminoWithdrawFlow(intent);
+  }
+
+  if (isBurrowDepositIntent(intent)) {
+    return executeBurrowDepositFlow(intent);
+  }
+
+  if (isBurrowWithdrawIntent(intent)) {
+    return executeBurrowWithdrawFlow(intent);
   }
 
   // Default to Solana swap flow
