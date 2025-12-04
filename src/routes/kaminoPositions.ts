@@ -36,17 +36,22 @@ interface KaminoPositionsResponse {
 
 app.get("/:marketAddress", async (c) => {
   const marketAddress = c.req.param("marketAddress");
-  const nearPublicKey = c.req.query("nearPublicKey");
+  const userDestination = c.req.query("userDestination");
 
   if (!marketAddress) {
     return c.json({ error: "marketAddress is required" }, 400);
   }
 
+  if (!userDestination) {
+    return c.json({ error: "userDestination is required" }, 400);
+  }
+
   try {
-    // Derive the user's Solana address from their NEAR public key
+    // Derive the user's Solana address using the same path as deposits
+    // userDestination is the NEAR account ID (e.g., "user.near")
     const userPublicKey = await deriveAgentPublicKey(
       SOLANA_DEFAULT_PATH,
-      nearPublicKey,
+      userDestination,
     );
     const userAddress = userPublicKey.toBase58();
 
@@ -126,12 +131,18 @@ app.get("/:marketAddress", async (c) => {
 
 // Get positions across all known markets
 app.get("/", async (c) => {
-  const nearPublicKey = c.req.query("nearPublicKey");
+  const userDestination = c.req.query("userDestination");
+
+  if (!userDestination) {
+    return c.json({ error: "userDestination is required" }, 400);
+  }
 
   try {
+    // Derive the user's Solana address using the same path as deposits
+    // userDestination is the NEAR account ID (e.g., "user.near")
     const userPublicKey = await deriveAgentPublicKey(
       SOLANA_DEFAULT_PATH,
-      nearPublicKey,
+      userDestination,
     );
     const userAddress = userPublicKey.toBase58();
 
@@ -139,8 +150,8 @@ app.get("/", async (c) => {
     return c.json({
       userAddress,
       message:
-        "Use GET /:marketAddress?nearPublicKey=... to query positions in a specific market",
-      example: `/api/kamino-positions/7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF?nearPublicKey=${nearPublicKey || "ed25519:..."}`,
+        "Use GET /:marketAddress?userDestination=... to query positions in a specific market",
+      example: `/api/kamino-positions/7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF?userDestination=${userDestination}`,
     });
   } catch (err) {
     console.error("Failed to derive address", err);
