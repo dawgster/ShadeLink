@@ -1,14 +1,14 @@
 # Stage 1: Dependencies
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --only=production
+COPY package.json ./
+RUN npm install --omit=dev
 
 # Stage 2: Build
 FROM node:22-alpine AS builder
 WORKDIR /app
-COPY package.json package-lock.json tsconfig.json ./
-RUN npm ci --include=dev
+COPY package.json tsconfig.json ./
+RUN npm install
 COPY src/ ./src/
 RUN npm run build
 
