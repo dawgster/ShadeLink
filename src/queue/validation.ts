@@ -145,8 +145,15 @@ function validateBurrowDepositIntent(message: IntentMessage): void {
     throw new Error("Burrow deposit requires metadata.tokenId");
   }
 
-  // Validate tokenId looks like a NEAR account
-  if (!metadata.tokenId.includes(".")) {
+  // Sanitize tokenId: strip nep141: prefix if present (Defuse asset ID format)
+  if (metadata.tokenId.startsWith("nep141:")) {
+    metadata.tokenId = metadata.tokenId.slice(7);
+  }
+
+  // Validate tokenId looks like a NEAR account (either named account with . or hex implicit account)
+  const isNamedAccount = metadata.tokenId.includes(".");
+  const isImplicitAccount = /^[0-9a-f]{64}$/i.test(metadata.tokenId);
+  if (!isNamedAccount && !isImplicitAccount) {
     throw new Error("Burrow deposit tokenId must be a valid NEAR contract address");
   }
 }
@@ -158,8 +165,15 @@ function validateBurrowWithdrawIntent(message: IntentMessage): void {
     throw new Error("Burrow withdraw requires metadata.tokenId");
   }
 
-  // Validate tokenId looks like a NEAR account
-  if (!metadata.tokenId.includes(".")) {
+  // Sanitize tokenId: strip nep141: prefix if present (Defuse asset ID format)
+  if (metadata.tokenId.startsWith("nep141:")) {
+    metadata.tokenId = metadata.tokenId.slice(7);
+  }
+
+  // Validate tokenId looks like a NEAR account (either named account with . or hex implicit account)
+  const isNamedAccount = metadata.tokenId.includes(".");
+  const isImplicitAccount = /^[0-9a-f]{64}$/i.test(metadata.tokenId);
+  if (!isNamedAccount && !isImplicitAccount) {
     throw new Error("Burrow withdraw tokenId must be a valid NEAR contract address");
   }
 }

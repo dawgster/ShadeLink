@@ -72,13 +72,13 @@ export async function executeKaminoDepositFlow(
 
   const meta = intent.metadata as KaminoDepositMetadata;
 
+  // Log all addresses involved in this flow
+  console.log(`[kaminoDeposit] === ADDRESS DEBUG INFO ===`);
+  console.log(`[kaminoDeposit] User destination address (NEAR): ${intent.userDestination}`);
+  console.log(`[kaminoDeposit] Agent destination (from intent): ${intent.agentDestination}`);
+  console.log(`[kaminoDeposit] Intents deposit address (first leg sent here): ${intent.intentsDepositAddress}`);
   if (config.dryRunSwaps) {
-    const result: KaminoDepositResult = { txId: `dry-run-kamino-${intent.intentId}` };
-    if (meta.useIntents) {
-      result.intentsDepositAddress = "dry-run-deposit-address";
-      result.swappedAmount = intent.sourceAmount;
-    }
-    return result;
+    console.log(`[kaminoDeposit] DRY RUN MODE ENABLED - will build tx but not submit`);
   }
 
   // Get the agent's Solana address with userDestination in path for custody isolation
@@ -87,6 +87,8 @@ export async function executeKaminoDepositFlow(
     intent.userDestination,
   );
   const agentSolanaAddress = agentPublicKey.toBase58();
+
+  console.log(`[kaminoDeposit] Derived Solana address (user agent): ${agentSolanaAddress}`);
 
   // Use intermediateAmount if available (set by quote route after intents swap)
   // Otherwise fall back to sourceAmount for direct deposits
@@ -101,6 +103,21 @@ export async function executeKaminoDepositFlow(
     intent,
     depositAmount,
   );
+
+  // In dry run mode, skip signing and sending the transaction
+  if (config.dryRunSwaps) {
+    console.log(`[kaminoDeposit] === DRY RUN MODE - SKIPPING TRANSACTION ===`);
+    console.log(`[kaminoDeposit] Would sign with fee payer: ${feePayerAddress}`);
+    console.log(`[kaminoDeposit] Would sign with user agent: ${userAgentAddress}`);
+    console.log(`[kaminoDeposit] Transaction message bytes: ${serializedMessage.length} bytes`);
+    console.log(`[kaminoDeposit] Dry run complete - no transaction submitted`);
+
+    return {
+      txId: `dry-run-kamino-${intent.intentId}`,
+      intentsDepositAddress: intent.intentsDepositAddress,
+      swappedAmount: depositAmount,
+    };
+  }
 
   // Transaction requires two signatures:
   // 1. Base agent (fee payer) - pays for gas
@@ -210,6 +227,12 @@ async function buildKaminoDepositTransaction(
   );
   const userAgentAddress = address(userAgentPublicKey.toBase58());
 
+  console.log(`[kaminoDeposit] === BUILD TX ADDRESS INFO ===`);
+  console.log(`[kaminoDeposit] Fee payer address (base agent): ${feePayerAddress}`);
+  console.log(`[kaminoDeposit] User agent address (token owner): ${userAgentAddress}`);
+  console.log(`[kaminoDeposit] Kamino market address: ${meta.marketAddress}`);
+  console.log(`[kaminoDeposit] Kamino mint address: ${meta.mintAddress}`);
+
   // Create a dummy signer for the fee payer - the Kamino SDK needs a signer object
   // but we'll sign externally via NEAR chain signatures
   const feePayerSigner = createDummySigner(feePayerAddress);
@@ -269,7 +292,12 @@ async function buildKaminoDepositTransaction(
   // Only add transfer if user agent needs more SOL
   if (userAgentBalance < MIN_RENT_LAMPORTS) {
     const amountNeeded = MIN_RENT_LAMPORTS - userAgentBalance;
-    console.log(`[kaminoDeposit] User agent has ${userAgentBalance} lamports, needs ${MIN_RENT_LAMPORTS}, transferring ${amountNeeded}`);
+    console.log(`[kaminoDeposit] === SPONSORED FUNDS TRANSFER ===`);
+    console.log(`[kaminoDeposit] Transferring sponsored SOL from: ${feePayerAddress}`);
+    console.log(`[kaminoDeposit] Transferring sponsored SOL to: ${userAgentAddress}`);
+    console.log(`[kaminoDeposit] User agent current balance: ${userAgentBalance} lamports`);
+    console.log(`[kaminoDeposit] Minimum required: ${MIN_RENT_LAMPORTS} lamports`);
+    console.log(`[kaminoDeposit] Amount being transferred: ${amountNeeded} lamports`);
 
     const fundUserAgentIx = getTransferSolInstruction({
       source: feePayerSigner,
@@ -278,7 +306,7 @@ async function buildKaminoDepositTransaction(
     });
     instructions.push(fundUserAgentIx);
   } else {
-    console.log(`[kaminoDeposit] User agent has sufficient SOL: ${userAgentBalance} lamports`);
+    console.log(`[kaminoDeposit] User agent has sufficient SOL: ${userAgentBalance} lamports, no sponsored transfer needed`);
   }
 
   instructions.push(...kaminoInstructions);

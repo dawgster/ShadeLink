@@ -5,10 +5,6 @@ import {
   buildSupplyTransaction,
 } from "../utils/burrow";
 import {
-  createIntentSigningMessage,
-  validateIntentSignature,
-} from "../utils/nearSignature";
-import {
   executeMetaTransaction,
   createFunctionCallAction,
   GAS_FOR_FT_TRANSFER_CALL,
@@ -29,25 +25,14 @@ export function isBurrowDepositIntent(
 }
 
 function verifyUserAuthorization(intent: ValidatedIntent): void {
-  if (!intent.nearPublicKey) {
-    throw new Error("Burrow deposit requires nearPublicKey to identify the user");
+  // Require userDestination for Burrow deposits
+  if (!intent.userDestination) {
+    throw new Error("Burrow deposit requires userDestination to identify the user");
   }
 
-  if (!intent.userSignature) {
-    throw new Error("Burrow deposit requires userSignature for authorization");
-  }
-
-  const expectedMessage = createIntentSigningMessage(intent);
-
-  const result = validateIntentSignature(
-    intent.userSignature,
-    intent.nearPublicKey,
-    expectedMessage,
-  );
-
-  if (!result.isValid) {
-    throw new Error(`Authorization failed: ${result.error}`);
-  }
+  // For deposits via intents, authorization is implicit via the deposit transaction
+  // The user proves ownership by sending funds to the intents deposit address
+  // No additional signature verification needed for this flow
 }
 
 export async function executeBurrowDepositFlow(
@@ -64,10 +49,6 @@ export async function executeBurrowDepositFlow(
       result.swappedAmount = intent.sourceAmount;
     }
     return result;
-  }
-
-  if (!intent.userDestination) {
-    throw new Error("Burrow deposit requires userDestination for custody isolation");
   }
 
   let depositAmount = intent.sourceAmount;

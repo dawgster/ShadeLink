@@ -42,18 +42,24 @@ export async function deriveNearImplicitAccount(
   }
 
   // Derive the ed25519 public key from the MPC
+  // IsEd25519: true is required to get an ed25519 key for NEAR implicit accounts
   const derivedKey = await chainSignatureContract.getDerivedPublicKey({
     path: derivationPath,
     predecessor: accountId,
+    IsEd25519: true,
   });
 
-  // Parse the derived key - expecting ed25519 format
-  if (typeof derivedKey !== "string" || !derivedKey.startsWith("ed25519:")) {
+  console.log(`[chainSignature] Derived key for path ${derivationPath}: ${derivedKey}`);
+
+  // Parse the derived key - expecting ed25519 format (Ed25519:base58key)
+  // The chainsig.js library returns "Ed25519:" prefix (capital E)
+  if (typeof derivedKey !== "string" || (!derivedKey.startsWith("ed25519:") && !derivedKey.startsWith("Ed25519:"))) {
     throw new Error(`Expected ed25519 key, got: ${derivedKey}`);
   }
 
   // Decode the base58 public key to get raw bytes
-  const keyBase58 = derivedKey.slice(8); // Remove "ed25519:" prefix
+  // Handle both "ed25519:" and "Ed25519:" prefixes
+  const keyBase58 = derivedKey.slice(8); // Remove "ed25519:" or "Ed25519:" prefix
   const keyBytes = base58Decode(keyBase58);
 
   if (keyBytes.length !== 32) {
@@ -63,9 +69,12 @@ export async function deriveNearImplicitAccount(
   // NEAR implicit account ID is the hex-encoded 32-byte public key
   const implicitAccountId = Buffer.from(keyBytes).toString("hex");
 
+  // Normalize to lowercase "ed25519:" for NEAR compatibility
+  const normalizedPublicKey = `ed25519:${keyBase58}`;
+
   return {
     accountId: implicitAccountId,
-    publicKey: derivedKey,
+    publicKey: normalizedPublicKey,
   };
 }
 

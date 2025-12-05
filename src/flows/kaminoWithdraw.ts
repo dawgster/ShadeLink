@@ -208,12 +208,21 @@ async function buildKaminoWithdrawTransaction(
     true,
   );
 
+  console.log(`[kaminoWithdraw] Withdraw action instruction counts:`, {
+    computeBudgetIxs: withdrawAction.computeBudgetIxs?.length ?? 'undefined',
+    setupIxs: withdrawAction.setupIxs?.length ?? 'undefined',
+    lendingIxs: withdrawAction.lendingIxs?.length ?? 'undefined',
+    cleanupIxs: withdrawAction.cleanupIxs?.length ?? 'undefined',
+  });
+
   const instructions = [
-    ...withdrawAction.computeBudgetIxs,
-    ...withdrawAction.setupIxs,
-    ...withdrawAction.lendingIxs,
-    ...withdrawAction.cleanupIxs,
-  ];
+    ...(withdrawAction.computeBudgetIxs || []),
+    ...(withdrawAction.setupIxs || []),
+    ...(withdrawAction.lendingIxs || []),
+    ...(withdrawAction.cleanupIxs || []),
+  ].filter((ix) => ix != null);
+
+  console.log(`[kaminoWithdraw] Total instructions after filtering: ${instructions.length}`);
 
   // For broadcasting via @solana/web3.js, we need to convert the transaction
   const connection = new Connection(config.solRpcUrl, "confirmed");
@@ -222,15 +231,18 @@ async function buildKaminoWithdrawTransaction(
   // Convert kit instructions to web3.js instructions
   // AccountRole values from @solana/instructions:
   // READONLY = 0, WRITABLE = 1, READONLY_SIGNER = 2, WRITABLE_SIGNER = 3
-  const web3Instructions = instructions.map((ix: any) => ({
-    programId: new PublicKey(ix.programAddress),
-    keys: ix.accounts.map((acc: any) => ({
-      pubkey: new PublicKey(acc.address),
-      isSigner: acc.role === 2 || acc.role === 3, // READONLY_SIGNER or WRITABLE_SIGNER
-      isWritable: acc.role === 1 || acc.role === 3, // WRITABLE or WRITABLE_SIGNER
-    })),
-    data: Buffer.from(ix.data),
-  }));
+  // Note: Some instructions (like ComputeBudget) don't have accounts
+  const web3Instructions = instructions.map((ix: any) => {
+    return {
+      programId: new PublicKey(ix.programAddress),
+      keys: (ix.accounts || []).map((acc: any) => ({
+        pubkey: new PublicKey(acc.address),
+        isSigner: acc.role === 2 || acc.role === 3, // READONLY_SIGNER or WRITABLE_SIGNER
+        isWritable: acc.role === 1 || acc.role === 3, // WRITABLE or WRITABLE_SIGNER
+      })),
+      data: Buffer.from(ix.data),
+    };
+  });
 
   const messageV0 = new TransactionMessage({
     payerKey: feePayerPublicKey, // Base agent pays for gas

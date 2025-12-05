@@ -1,14 +1,16 @@
-import { Account, connect, keyStores, KeyPair } from "near-api-js";
-import { actionCreators, SignedDelegate, Action, encodeDelegateAction, buildDelegateAction } from "@near-js/transactions";
-import { PublicKey, KeyType } from "@near-js/crypto";
+import { Account } from "@near-js/accounts";
 import { JsonRpcProvider } from "@near-js/providers";
-import { Signature } from "@near-js/transactions";
+import { KeyPairSigner } from "@near-js/signers";
+import { NEAR } from "@near-js/tokens";
+import { actionCreators, SignedDelegate, Action, encodeDelegateAction, buildDelegateAction, Signature } from "@near-js/transactions";
+import { PublicKey, KeyType } from "@near-js/crypto";
 import { config, isTestnet } from "../config";
 import { deriveNearImplicitAccount, NEAR_DEFAULT_PATH } from "./chainSignature";
-import { requestSignature, agentAccountId } from "@neardefi/shade-agent-js";
+import { requestSignature } from "@neardefi/shade-agent-js";
 import { utils } from "chainsig.js";
 import { parseSeedPhrase } from "near-seed-phrase";
 import crypto from "crypto";
+import bs58 from "bs58";
 
 const { uint8ArrayToHex } = utils.cryptography;
 
@@ -21,22 +23,89 @@ const DELEGATE_ACTION_TTL = 120;
 const networkId = isTestnet ? "testnet" : "mainnet";
 const nodeUrl = config.nearRpcUrls[0] || (isTestnet ? "https://rpc.testnet.near.org" : "https://rpc.mainnet.near.org");
 
+// Cache the relayer account setup
+let cachedRelayer: { account: Account; publicKey: string } | null = null;
+
 /**
  * Get the relayer account (agent's account that pays for gas)
+ * Uses the NEAR_SEED_PHRASE to derive the account
  */
-async function getRelayerAccount(): Promise<Account> {
+async function getRelayerAccount(): Promise<{ account: Account; publicKey: string }> {
   if (!config.nearSeedPhrase) {
     throw new Error("NEAR_SEED_PHRASE not configured");
   }
 
-  const { accountId } = await agentAccountId();
-  const { secretKey } = parseSeedPhrase(config.nearSeedPhrase);
+  // Use cached account if available
+  if (cachedRelayer) {
+    return cachedRelayer;
+  }
 
-  const keyStore = new keyStores.InMemoryKeyStore();
-  await keyStore.setKey(networkId, accountId, KeyPair.fromString(secretKey as `ed25519:${string}`));
+  const { secretKey, publicKey } = parseSeedPhrase(config.nearSeedPhrase);
 
-  const near = await connect({ networkId, keyStore, nodeUrl });
-  return near.account(accountId);
+  // Derive implicit account ID from the public key
+  // The public key is in format "ed25519:base58key"
+  const pubKeyBase58 = publicKey.replace("ed25519:", "");
+  const pubKeyBytes = bs58.decode(pubKeyBase58);
+  const accountId = Buffer.from(pubKeyBytes).toString("hex");
+
+  console.log("[nearMetaTx] Relayer account from seed phrase:", accountId);
+  console.log("[nearMetaTx] Relayer public key:", publicKey);
+
+  // Create signer and provider per @near-js docs
+  const signer = KeyPairSigner.fromSecretKey(secretKey as `ed25519:${string}`);
+  const provider = new JsonRpcProvider({ url: nodeUrl });
+
+  // Create account object
+  const account = new Account(accountId, provider, signer);
+
+  cachedRelayer = { account, publicKey };
+  return cachedRelayer;
+}
+
+// Minimum NEAR to fund implicit account for gas (0.01 NEAR)
+const IMPLICIT_ACCOUNT_FUNDING = BigInt("10000000000000000000000");
+
+/**
+ * Ensure the implicit account exists by funding it if needed.
+ * This is needed before tokens can be received or meta transactions executed.
+ */
+export async function ensureImplicitAccountExists(
+  provider: JsonRpcProvider,
+  accountId: string,
+  publicKeyStr: string,
+): Promise<void> {
+  try {
+    // Check if account exists by querying its state
+    await provider.query({
+      request_type: "view_account",
+      finality: "final",
+      account_id: accountId,
+    });
+    console.log(`[nearMetaTx] Implicit account ${accountId} already exists`);
+  } catch (e: any) {
+    // Check for account not existing - can be in message or type
+    const isAccountNotFound =
+      e.message?.includes("does not exist") ||
+      e.type === "AccountDoesNotExist";
+
+    if (!isAccountNotFound) throw e;
+
+    // Account doesn't exist - fund it to create using the relayer account
+    console.log(`[nearMetaTx] Creating implicit account ${accountId} by funding with NEAR`);
+
+    const { account: relayer } = await getRelayerAccount();
+    const result = await relayer.transfer({
+      receiverId: accountId,
+      amount: IMPLICIT_ACCOUNT_FUNDING,
+      token: NEAR,
+    });
+
+    const txHash = (result as any).transaction?.hash || (result as any).transaction_outcome?.id;
+    console.log(`[nearMetaTx] Funded implicit account ${accountId}: ${txHash}`);
+
+    // Wait a bit for the account to be created
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
 }
 
 /**
@@ -50,11 +119,18 @@ export async function executeMetaTransaction(
   const provider = new JsonRpcProvider({ url: nodeUrl });
 
   // Derive the user's NEAR implicit account
+  // userDestination goes in 3rd parameter for custody isolation
   const { accountId: senderId, publicKey: publicKeyStr } = await deriveNearImplicitAccount(
     NEAR_DEFAULT_PATH,
+    undefined, // nearPublicKey - not used
     userDestination,
   );
   const publicKey = PublicKey.fromString(publicKeyStr);
+
+  console.log(`[nearMetaTx] Derived account for userDestination=${userDestination}: ${senderId}`);
+
+  // Ensure the implicit account exists (fund it if needed)
+  await ensureImplicitAccountExists(provider, senderId, publicKeyStr);
 
   console.log(`[nearMetaTx] Building delegate action for ${senderId} -> ${receiverId}`);
 
@@ -117,7 +193,7 @@ export async function executeMetaTransaction(
   });
 
   // Submit via relayer
-  const relayer = await getRelayerAccount();
+  const { account: relayer } = await getRelayerAccount();
   console.log(`[nearMetaTx] Relaying via ${relayer.accountId}`);
 
   const result = await relayer.signAndSendTransaction({
