@@ -18,7 +18,39 @@ services:
     restart: always
     ports:
       - "3140:3140"
- 
+
+  # Local shade-agent app
+  shade-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shade-agent
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - NEAR_ACCOUNT_ID=${NEAR_ACCOUNT_ID}
+      - NEAR_SEED_PHRASE=${NEAR_SEED_PHRASE}
+      - NEAR_NETWORK=${NEAR_NETWORK:-mainnet}
+      - NEAR_RPC_JSON=${NEAR_RPC_JSON}
+      - NEXT_PUBLIC_contractId=${NEXT_PUBLIC_contractId}
+      - CHAIN_SIGNATURE_CONTRACT_ID=${CHAIN_SIGNATURE_CONTRACT_ID}
+      - CHAIN_SIGNATURE_MPC_KEY=${CHAIN_SIGNATURE_MPC_KEY}
+      - SOL_RPC_URL=${SOL_RPC_URL}
+      - ETH_RPC_URL=${ETH_RPC_URL}
+      - JUPITER_API_URL=${JUPITER_API_URL}
+      - API_PROXY_URL=${API_PROXY_URL}
+      - API_CODEHASH=${API_CODEHASH}
+      - APP_CODEHASH=${APP_CODEHASH}
+      - INTENTS_QUOTE_URL=${INTENTS_QUOTE_URL}
+      - ENABLE_QUEUE=${ENABLE_QUEUE:-true}
+      - QUEUE_CONCURRENCY=${QUEUE_CONCURRENCY:-5}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - redis
+    restart: always
+
   redis:
     image: redis:7-alpine
     container_name: shade-agent-redis
