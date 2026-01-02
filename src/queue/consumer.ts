@@ -1,25 +1,10 @@
 import { setStatus } from "../state/status";
 import { RedisQueueClient } from "./redis";
 import { IntentMessage, ValidatedIntent } from "./types";
-import { executeSolanaSwapFlow } from "../flows/solSwap";
-import {
-  executeKaminoDepositFlow,
-  isKaminoDepositIntent,
-} from "../flows/kaminoDeposit";
-import {
-  executeKaminoWithdrawFlow,
-  isKaminoWithdrawIntent,
-} from "../flows/kaminoWithdraw";
-import {
-  executeBurrowDepositFlow,
-  isBurrowDepositIntent,
-} from "../flows/burrowDeposit";
-import {
-  executeBurrowWithdrawFlow,
-  isBurrowWithdrawIntent,
-} from "../flows/burrowWithdraw";
 import { validateIntent } from "./validation";
 import { config } from "../config";
+import { flowRegistry, createFlowContext } from "../flows";
+import { emitFlowMetrics, categorizeError } from "../flows/metrics";
 
 /**
  * Starts the queue consumer with parallel processing support.
@@ -163,7 +148,8 @@ function needsIntentsWait(intent: ValidatedIntent): boolean {
 }
 
 /**
- * Routes the intent to the appropriate execution flow based on metadata
+ * Routes the intent to the appropriate execution flow based on metadata.
+ * Uses the flow registry to find and execute the matching flow.
  */
 async function executeIntentFlow(
   intent: ValidatedIntent,
@@ -185,22 +171,62 @@ async function executeIntentFlow(
     return { txId: `awaiting-intents-${intent.intentId}` };
   }
 
-  if (isKaminoDepositIntent(intent)) {
-    return executeKaminoDepositFlow(intent);
+  // Find matching flow from registry
+  const flow = flowRegistry.findMatch(intent);
+
+  if (!flow) {
+    const action = intent.metadata?.action;
+    throw new Error(
+      `No flow registered for action: ${action ?? "undefined"}. ` +
+      `Registered flows: ${flowRegistry.getAll().map((f) => f.action).join(", ")}`
+    );
   }
 
-  if (isKaminoWithdrawIntent(intent)) {
-    return executeKaminoWithdrawFlow(intent);
-  }
+  console.log(`[consumer] Dispatching intent ${intent.intentId} to flow: ${flow.action}`);
 
-  if (isBurrowDepositIntent(intent)) {
-    return executeBurrowDepositFlow(intent);
-  }
+  // Create flow context with status update capability and metrics
+  const ctx = createFlowContext({
+    intentId: intent.intentId,
+    config,
+    flowAction: flow.action,
+    flowName: flow.name,
+    setStatus: async (status, detail) => {
+      await setStatus(intent.intentId, {
+        state: status as any,
+        ...detail,
+      });
+    },
+  });
 
-  if (isBurrowWithdrawIntent(intent)) {
-    return executeBurrowWithdrawFlow(intent);
-  }
+  // Set chain info for metrics
+  ctx.metrics.setChains(intent.sourceChain, intent.destinationChain);
+  ctx.metrics.setAmounts(intent.sourceAmount);
 
-  // Default to Solana swap flow
-  return executeSolanaSwapFlow(intent);
+  try {
+    // Validate authorization if the flow requires it
+    if (flow.validateAuthorization) {
+      ctx.metrics.startStep("authorization");
+      await flow.validateAuthorization(intent as any, ctx);
+      ctx.metrics.endStep(true);
+    }
+
+    // Execute the flow
+    ctx.metrics.startStep("execute");
+    const result = await flow.execute(intent as any, ctx);
+    ctx.metrics.endStep(true);
+
+    // Capture result data for metrics
+    if (result.txId) ctx.metrics.setTxId(result.txId);
+    if (result.swappedAmount) ctx.metrics.setAmounts(intent.sourceAmount, result.swappedAmount);
+
+    // Emit success metrics
+    emitFlowMetrics(ctx.metrics.success(), ctx.logger);
+
+    return result;
+  } catch (err) {
+    // Emit failure metrics
+    const errorType = categorizeError(err);
+    emitFlowMetrics(ctx.metrics.failure(errorType, (err as Error).message), ctx.logger);
+    throw err;
+  }
 }

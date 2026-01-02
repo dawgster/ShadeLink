@@ -2,9 +2,14 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
 import dotenv from "dotenv";
+
+// Import flows first to trigger self-registration before consumer starts
+import "./flows";
+
 import { startQueueConsumer } from "./queue/consumer";
 import { startIntentsPoller } from "./queue/intentsPoller";
 import { config } from "./config";
+import { flowRegistry } from "./flows";
 
 // Load environment variables from .env file (only needed for local development)
 if (process.env.NODE_ENV !== "production") {
@@ -49,6 +54,10 @@ app.route("/api/burrow-positions", burrowPositions);
 
 // Start the server
 const port = Number(process.env.PORT || "3000");
+
+// Log registered flows
+const registeredFlows = flowRegistry.getAll();
+console.log(`Registered ${registeredFlows.length} flows: ${registeredFlows.map((f) => f.action).join(", ")}`);
 
 console.log(`App is running on port ${port}`);
 

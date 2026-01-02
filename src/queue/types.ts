@@ -61,11 +61,20 @@ export interface BurrowWithdrawMetadata extends Record<string, unknown> {
   };
 }
 
+export interface NearSwapMetadata extends Record<string, unknown> {
+  action: "near-swap";
+  /** Input token contract address (e.g., "wrap.near", "usdc.token.near") */
+  tokenIn: string;
+  /** Output token contract address */
+  tokenOut: string;
+}
+
 export type IntentMetadata =
   | KaminoDepositMetadata
   | KaminoWithdrawMetadata
   | BurrowDepositMetadata
   | BurrowWithdrawMetadata
+  | NearSwapMetadata
   | Record<string, unknown>;
 
 export interface IntentMessage {

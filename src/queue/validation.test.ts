@@ -1,6 +1,66 @@
-import { describe, expect, it } from "vitest";
-import { validateIntent } from "./validation";
+import { describe, expect, it, vi } from "vitest";
 import { IntentMessage, KaminoDepositMetadata, KaminoWithdrawMetadata } from "./types";
+
+// Mock flows must be hoisted for vi.mock to access them
+const { mockFlows } = vi.hoisted(() => {
+  const mockExecute = async () => ({ txId: "mock-tx" });
+
+  return {
+    mockFlows: {
+      "kamino-deposit": {
+        action: "kamino-deposit",
+        name: "Kamino Deposit",
+        description: "Test flow",
+        supportedChains: { source: ["near", "solana"], destination: ["solana"] },
+        requiredMetadataFields: ["action", "marketAddress", "mintAddress"],
+        isMatch: (intent: any) => intent.metadata?.action === "kamino-deposit",
+        execute: mockExecute,
+      },
+      "kamino-withdraw": {
+        action: "kamino-withdraw",
+        name: "Kamino Withdraw",
+        description: "Test flow",
+        supportedChains: { source: ["solana"], destination: ["solana"] },
+        requiredMetadataFields: ["action", "marketAddress", "mintAddress"],
+        isMatch: (intent: any) => intent.metadata?.action === "kamino-withdraw",
+        execute: mockExecute,
+      },
+      "burrow-deposit": {
+        action: "burrow-deposit",
+        name: "Burrow Deposit",
+        description: "Test flow",
+        supportedChains: { source: ["near"], destination: ["near"] },
+        requiredMetadataFields: ["action", "tokenId"],
+        isMatch: (intent: any) => intent.metadata?.action === "burrow-deposit",
+        execute: mockExecute,
+      },
+      "burrow-withdraw": {
+        action: "burrow-withdraw",
+        name: "Burrow Withdraw",
+        description: "Test flow",
+        supportedChains: { source: ["near"], destination: ["near"] },
+        requiredMetadataFields: ["action", "tokenId"],
+        isMatch: (intent: any) => intent.metadata?.action === "burrow-withdraw",
+        execute: mockExecute,
+      },
+    } as Record<string, any>,
+  };
+});
+
+// Mock the flowRegistry module
+vi.mock("../flows/registry", () => ({
+  flowRegistry: {
+    get: (action: string) => mockFlows[action],
+    has: (action: string) => action in mockFlows,
+    getAll: () => Object.values(mockFlows),
+    findMatch: (intent: any) => {
+      const action = intent.metadata?.action;
+      return action ? mockFlows[action] : undefined;
+    },
+  },
+}));
+
+import { validateIntent } from "./validation";
 
 const baseIntent: IntentMessage = {
   intentId: "test-intent",

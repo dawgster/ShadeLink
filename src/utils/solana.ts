@@ -98,3 +98,59 @@ export async function broadcastSolanaTx(tx: VersionedTransaction, skipConfirmati
 
   return sig;
 }
+
+// ─── High-Level Transaction Helpers ─────────────────────────────────────────────
+
+// Import here to avoid circular dependency at module load
+import { signWithNearChainSignatures } from "./chainSignature";
+
+/**
+ * Sign and broadcast a Solana transaction with a single signer.
+ * Used for flows where only the user agent signs (e.g., Jupiter swap).
+ *
+ * @param transaction - The versioned transaction to sign and broadcast
+ * @param userDestination - The user's destination address for key derivation
+ * @returns Transaction signature (txId)
+ */
+export async function signAndBroadcastSingleSigner(
+  transaction: VersionedTransaction,
+  userDestination: string,
+): Promise<string> {
+  const signature = await signWithNearChainSignatures(
+    transaction.message.serialize(),
+    userDestination,
+  );
+  const finalized = attachSignatureToVersionedTx(transaction, signature);
+  return broadcastSolanaTx(finalized);
+}
+
+/**
+ * Sign and broadcast a Solana transaction with dual signers (fee payer + user agent).
+ * Used for flows where both the base agent pays fees and user agent owns tokens.
+ *
+ * @param transaction - The versioned transaction to sign and broadcast
+ * @param serializedMessage - The serialized message bytes to sign
+ * @param userDestination - The user's destination address for key derivation
+ * @returns Transaction signature (txId)
+ */
+export async function signAndBroadcastDualSigner(
+  transaction: VersionedTransaction,
+  serializedMessage: Uint8Array,
+  userDestination: string,
+): Promise<string> {
+  const feePayerSignature = await signWithNearChainSignatures(
+    serializedMessage,
+    undefined, // base agent path
+  );
+  const userAgentSignature = await signWithNearChainSignatures(
+    serializedMessage,
+    userDestination,
+  );
+
+  const finalized = attachMultipleSignaturesToVersionedTx(transaction, [
+    { signature: feePayerSignature, index: 0 },
+    { signature: userAgentSignature, index: 1 },
+  ]);
+
+  return broadcastSolanaTx(finalized);
+}

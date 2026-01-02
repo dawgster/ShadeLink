@@ -1,226 +1,224 @@
-import { config } from "../config";
 import { BurrowWithdrawMetadata, ValidatedIntent } from "../queue/types";
 import {
   getAssetsPagedDetailed,
   buildWithdrawTransaction,
 } from "../utils/burrow";
+import { validateNearWithdrawAuthorization } from "../utils/authorization";
 import {
-  createIntentSigningMessage,
-  validateIntentSignature,
-} from "../utils/nearSignature";
-import {
-  executeMetaTransaction,
-  createFunctionCallAction,
+  deriveNearAgentAccount,
+  ensureNearAccountFunded,
+  executeNearFunctionCall,
+  NEAR_DEFAULT_PATH,
   GAS_FOR_FT_TRANSFER_CALL,
   ZERO_DEPOSIT,
   ONE_YOCTO,
-} from "../utils/nearMetaTx";
-import {
-  OneClickService,
-  OpenAPI,
-} from "@defuse-protocol/one-click-sdk-typescript";
+} from "../utils/near";
 import { getDefuseAssetId } from "../utils/tokenMappings";
+import { getIntentsQuote, createBridgeBackQuoteRequest } from "../utils/intents";
+import { flowRegistry } from "./registry";
+import { logNearAddressInfo } from "./context";
+import type { FlowDefinition, FlowContext, FlowResult, AppConfig, Logger } from "./types";
 
-interface BurrowWithdrawResult {
-  txId: string;
-  bridgeTxId?: string;
-  intentsDepositAddress?: string;
-}
-
-export function isBurrowWithdrawIntent(
-  intent: ValidatedIntent,
-): intent is ValidatedIntent & { metadata: BurrowWithdrawMetadata } {
-  const meta = intent.metadata as BurrowWithdrawMetadata | undefined;
-  return meta?.action === "burrow-withdraw" && !!meta.tokenId;
-}
-
-function verifyUserAuthorization(intent: ValidatedIntent): void {
-  if (!intent.nearPublicKey) {
-    throw new Error("Burrow withdraw requires nearPublicKey to identify the user");
-  }
-
-  if (!intent.userSignature) {
-    throw new Error("Burrow withdraw requires userSignature for authorization");
-  }
-
-  const expectedMessage = createIntentSigningMessage(intent);
-
-  const result = validateIntentSignature(
-    intent.userSignature,
-    intent.nearPublicKey,
-    expectedMessage,
-  );
-
-  if (!result.isValid) {
-    throw new Error(`Authorization failed: ${result.error}`);
-  }
-}
-
-export async function executeBurrowWithdrawFlow(
-  intent: ValidatedIntent,
-): Promise<BurrowWithdrawResult> {
-  verifyUserAuthorization(intent);
-
-  const meta = intent.metadata as BurrowWithdrawMetadata;
-
-  if (config.dryRunSwaps) {
-    const result: BurrowWithdrawResult = { txId: `dry-run-burrow-withdraw-${intent.intentId}` };
-    if (meta.bridgeBack) {
-      result.bridgeTxId = `dry-run-bridge-${intent.intentId}`;
-      result.intentsDepositAddress = "dry-run-deposit-address";
-    }
-    return result;
-  }
-
-  if (!intent.userDestination) {
-    throw new Error("Burrow withdraw requires userDestination for custody isolation");
-  }
-
-  // Verify the token can be withdrawn
-  const assets = await getAssetsPagedDetailed();
-  const asset = assets.find((a) => a.token_id === meta.tokenId);
-
-  if (!asset) {
-    throw new Error(`Token ${meta.tokenId} is not supported by Burrow`);
-  }
-
-  if (!asset.config.can_withdraw) {
-    throw new Error(`Token ${meta.tokenId} cannot be withdrawn from Burrow`);
-  }
-
-  const withdrawAmount = intent.sourceAmount;
-
-  // Build the withdraw transaction using Rhea SDK
-  const withdrawTx = await buildWithdrawTransaction({
-    token_id: meta.tokenId,
-    amount: withdrawAmount,
-  });
-
-  console.log(`[burrowWithdraw] Built withdraw tx via Rhea SDK: ${withdrawTx.method_name} on ${withdrawTx.contract_id}`);
-
-  // Create action for meta transaction
-  const action = createFunctionCallAction(
-    withdrawTx.method_name,
-    withdrawTx.args,
-    GAS_FOR_FT_TRANSFER_CALL,
-    ZERO_DEPOSIT,
-  );
-
-  // Execute via meta transaction - agent pays for gas
-  const txHash = await executeMetaTransaction(
-    intent.userDestination,
-    withdrawTx.contract_id,
-    [action],
-  );
-
-  console.log(`[burrowWithdraw] Withdraw tx confirmed: ${txHash}`);
-
-  // If bridgeBack is configured, send withdrawn tokens to intents for cross-chain swap
-  if (meta.bridgeBack) {
-    const bridgeResult = await executeBridgeBack(intent, meta);
-    return {
-      txId: txHash,
-      bridgeTxId: bridgeResult.txId,
-      intentsDepositAddress: bridgeResult.depositAddress,
-    };
-  }
-
-  return { txId: txHash };
-}
+// ─── Helper Types ──────────────────────────────────────────────────────────────
 
 interface BridgeBackResult {
   txId: string;
   depositAddress: string;
 }
 
-/**
- * After withdrawing from Burrow, bridges the withdrawn tokens back to the user's
- * destination chain via NEAR intents.
- *
- * Flow:
- * 1. Request a quote from intents with dry: false to get the deposit address
- * 2. Build ft_transfer_call to send tokens to intents deposit address
- * 3. Execute via meta transaction
- * 4. Intents handles the cross-chain swap from there
- */
+interface NearAgentAccount {
+  accountId: string;
+  publicKey: string;
+  derivationPath: string;
+}
+
+// ─── Helper Functions ──────────────────────────────────────────────────────────
+
 async function executeBridgeBack(
-  intent: ValidatedIntent,
+  intent: ValidatedIntent & { metadata: BurrowWithdrawMetadata },
   meta: BurrowWithdrawMetadata,
+  userAgent: NearAgentAccount,
+  config: AppConfig,
+  logger: Logger,
 ): Promise<BridgeBackResult> {
   if (!meta.bridgeBack) {
     throw new Error("bridgeBack configuration missing");
   }
 
-  const { destinationChain, destinationAddress, destinationAsset, slippageTolerance } = meta.bridgeBack;
   const tokenId = meta.tokenId;
   const withdrawnAmount = intent.sourceAmount;
 
-  console.log(`[burrowWithdraw] Starting bridge back to ${destinationChain}`, {
-    destinationAddress,
-    destinationAsset,
+  logger.info(`Starting bridge back to ${meta.bridgeBack.destinationChain}`, {
+    destinationAddress: meta.bridgeBack.destinationAddress,
+    destinationAsset: meta.bridgeBack.destinationAsset,
     amount: withdrawnAmount,
     tokenId,
   });
 
-  // Step 1: Get intents quote with dry: false to get deposit address
-  if (config.intentsQuoteUrl) {
-    OpenAPI.BASE = config.intentsQuoteUrl;
-  }
-
-  // Convert NEAR token ID to Defuse asset ID
+  // Get deposit address from Defuse Intents
   const originAsset = getDefuseAssetId("near", tokenId) || `nep141:${tokenId}`;
-
-  // Create deadline 30 minutes from now
-  const deadline = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-
-  const quoteRequest = {
+  const quoteRequest = createBridgeBackQuoteRequest(
+    meta.bridgeBack,
     originAsset,
-    destinationAsset, // Caller provides this in Defuse format
-    amount: String(withdrawnAmount),
-    swapType: "EXACT_INPUT" as const,
-    slippageTolerance: slippageTolerance ?? 300, // Default 3%
-    dry: false, // Important: we need the deposit address
-    recipient: destinationAddress,
-    recipientType: "DESTINATION_CHAIN" as const,
-    refundTo: intent.refundAddress || intent.userDestination,
-    refundType: "ORIGIN_CHAIN" as const,
-    depositType: "ORIGIN_CHAIN" as const,
-    deadline,
-  };
+    withdrawnAmount,
+    intent.refundAddress || intent.userDestination,
+  );
 
-  console.log("[burrowWithdraw] Requesting intents quote", quoteRequest);
+  const { depositAddress } = await getIntentsQuote(quoteRequest, config);
 
-  const quoteResponse = await OneClickService.getQuote(quoteRequest as any);
-
-  // Extract deposit address from the quote response
-  const depositAddress = (quoteResponse as any).depositAddress;
-  if (!depositAddress) {
-    throw new Error("Intents quote response missing depositAddress");
-  }
-
-  console.log(`[burrowWithdraw] Got intents deposit address: ${depositAddress}`);
-
-  // Step 2: Build ft_transfer_call to send tokens to intents deposit address
-  // For NEP-141 tokens, we use ft_transfer_call with a message
-  const ftTransferAction = createFunctionCallAction(
-    "ft_transfer_call",
-    {
+  // Execute ft_transfer_call to send tokens to intents deposit address
+  const bridgeTxHash = await executeNearFunctionCall({
+    from: userAgent,
+    receiverId: tokenId,
+    methodName: "ft_transfer_call",
+    args: {
       receiver_id: depositAddress,
       amount: withdrawnAmount,
-      msg: "", // Empty message for simple transfer
+      msg: "",
     },
-    GAS_FOR_FT_TRANSFER_CALL,
-    ONE_YOCTO, // NEP-141 requires 1 yoctoNEAR deposit
-  );
+    gas: GAS_FOR_FT_TRANSFER_CALL,
+    deposit: ONE_YOCTO,
+  });
 
-  // Execute via meta transaction - agent pays for gas
-  const bridgeTxHash = await executeMetaTransaction(
-    intent.userDestination!,
-    tokenId, // The token contract
-    [ftTransferAction],
-  );
-
-  console.log(`[burrowWithdraw] Bridge transfer tx confirmed: ${bridgeTxHash}`);
+  logger.info(`Bridge transfer tx confirmed: ${bridgeTxHash}`);
 
   return { txId: bridgeTxHash, depositAddress };
+}
+
+// ─── Flow Definition ───────────────────────────────────────────────────────────
+
+const burrowWithdrawFlow: FlowDefinition<BurrowWithdrawMetadata> = {
+  action: "burrow-withdraw",
+  name: "Burrow Withdraw",
+  description: "Withdraw tokens from Burrow lending protocol on NEAR",
+
+  supportedChains: {
+    source: ["near"],
+    destination: ["near", "ethereum", "base", "arbitrum", "solana"],
+  },
+
+  requiredMetadataFields: ["action", "tokenId"],
+  optionalMetadataFields: ["bridgeBack"],
+
+  isMatch: (intent): intent is ValidatedIntent & { metadata: BurrowWithdrawMetadata } => {
+    const meta = intent.metadata as BurrowWithdrawMetadata | undefined;
+    return meta?.action === "burrow-withdraw" && !!meta.tokenId;
+  },
+
+  validateMetadata: (metadata) => {
+    // Sanitize tokenId: strip nep141: prefix if present (Defuse asset ID format)
+    if (metadata.tokenId.startsWith("nep141:")) {
+      metadata.tokenId = metadata.tokenId.slice(7);
+    }
+
+    // Validate tokenId looks like a NEAR account (either named account with . or hex implicit account)
+    const isNamedAccount = metadata.tokenId.includes(".");
+    const isImplicitAccount = /^[0-9a-f]{64}$/i.test(metadata.tokenId);
+    if (!isNamedAccount && !isImplicitAccount) {
+      throw new Error("Burrow withdraw tokenId must be a valid NEAR contract address");
+    }
+  },
+
+  validateAuthorization: async (intent, ctx) => {
+    validateNearWithdrawAuthorization(intent, ctx, "Burrow withdraw");
+  },
+
+  execute: async (intent, ctx): Promise<FlowResult> => {
+    const { config, logger } = ctx;
+    const meta = intent.metadata;
+
+    if (config.dryRunSwaps) {
+      const result: FlowResult = { txId: `dry-run-burrow-withdraw-${intent.intentId}` };
+      if (meta.bridgeBack) {
+        result.bridgeTxId = `dry-run-bridge-${intent.intentId}`;
+        result.intentsDepositAddress = "dry-run-deposit-address";
+      }
+      return result;
+    }
+
+    if (!intent.userDestination) {
+      throw new Error("Burrow withdraw requires userDestination for custody isolation");
+    }
+
+    // Derive the user's NEAR agent account
+    const userAgent = await deriveNearAgentAccount(NEAR_DEFAULT_PATH, intent.userDestination);
+
+    logNearAddressInfo(logger, intent.userDestination, userAgent);
+
+    // Ensure the implicit account exists (fund it if needed)
+    await ensureNearAccountFunded(userAgent.accountId);
+
+    // Verify the token can be withdrawn
+    const assets = await getAssetsPagedDetailed();
+    const asset = assets.find((a) => a.token_id === meta.tokenId);
+
+    if (!asset) {
+      throw new Error(`Token ${meta.tokenId} is not supported by Burrow`);
+    }
+
+    if (!asset.config.can_withdraw) {
+      throw new Error(`Token ${meta.tokenId} cannot be withdrawn from Burrow`);
+    }
+
+    const withdrawAmount = intent.sourceAmount;
+
+    // Build the withdraw transaction using Rhea SDK
+    const withdrawTx = await buildWithdrawTransaction({
+      token_id: meta.tokenId,
+      amount: withdrawAmount,
+    });
+
+    logger.info(`Built withdraw tx via Rhea SDK: ${withdrawTx.method_name} on ${withdrawTx.contract_id}`);
+
+    // Execute NEAR transaction (prepare, sign, broadcast)
+    const txHash = await executeNearFunctionCall({
+      from: userAgent,
+      receiverId: withdrawTx.contract_id,
+      methodName: withdrawTx.method_name,
+      args: withdrawTx.args,
+      gas: GAS_FOR_FT_TRANSFER_CALL,
+      deposit: ZERO_DEPOSIT,
+    });
+
+    logger.info(`Withdraw tx confirmed: ${txHash}`);
+
+    // If bridgeBack is configured, send withdrawn tokens to intents for cross-chain swap
+    if (meta.bridgeBack) {
+      const bridgeResult = await executeBridgeBack(intent, meta, userAgent, config, logger);
+      return {
+        txId: txHash,
+        bridgeTxId: bridgeResult.txId,
+        intentsDepositAddress: bridgeResult.depositAddress,
+      };
+    }
+
+    return { txId: txHash };
+  },
+};
+
+// ─── Self-Registration ─────────────────────────────────────────────────────────
+
+flowRegistry.register(burrowWithdrawFlow);
+
+// ─── Exports ───────────────────────────────────────────────────────────────────
+
+export { burrowWithdrawFlow };
+
+// Legacy exports for backwards compatibility during migration
+export const isBurrowWithdrawIntent = burrowWithdrawFlow.isMatch;
+
+import { config as globalConfig } from "../config";
+import { createFlowContext } from "./context";
+
+export async function executeBurrowWithdrawFlow(
+  intent: ValidatedIntent,
+): Promise<FlowResult> {
+  if (!burrowWithdrawFlow.isMatch(intent)) {
+    throw new Error("Intent does not match Burrow withdraw flow");
+  }
+  const ctx = createFlowContext({ intentId: intent.intentId, config: globalConfig });
+  if (burrowWithdrawFlow.validateAuthorization) {
+    await burrowWithdrawFlow.validateAuthorization(intent, ctx);
+  }
+  return burrowWithdrawFlow.execute(intent, ctx);
 }
