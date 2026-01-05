@@ -13,6 +13,9 @@ import "./burrowDeposit";
 import "./burrowWithdraw";
 import "./solSwap";
 import "./nearSwap";
+import "./orderCreate";
+import "./orderExecute";
+import "./orderCancel";
 
 // Re-export registry and types for external use
 export { flowRegistry } from "./registry";
@@ -32,3 +35,6 @@ export { burrowDepositFlow } from "./burrowDeposit";
 export { burrowWithdrawFlow } from "./burrowWithdraw";
 export { solSwapFlow } from "./solSwap";
 export { nearSwapFlow } from "./nearSwap";
+export { orderCreateFlow, deriveOrderAgentAddress } from "./orderCreate";
+export { orderExecuteFlow } from "./orderExecute";
+export { orderCancelFlow } from "./orderCancel";

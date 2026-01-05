@@ -69,12 +69,69 @@ export interface NearSwapMetadata extends Record<string, unknown> {
   tokenOut: string;
 }
 
+// ─── Conditional Order Types ─────────────────────────────────────────────────
+
+export type OrderType = "limit" | "stop-loss" | "take-profit";
+export type OrderSide = "buy" | "sell";
+export type PriceCondition = "above" | "below";
+
+export interface OrderCreateMetadata extends Record<string, unknown> {
+  action: "order-create";
+  /** Unique order identifier */
+  orderId: string;
+  /** Type of order */
+  orderType: OrderType;
+  /** Buy or sell */
+  side: OrderSide;
+  /** Asset to monitor price of (the "base" asset, e.g., SOL) */
+  priceAsset: string;
+  /** Asset to quote price in (e.g., USDC) */
+  quoteAsset: string;
+  /** Trigger price in quote asset units (e.g., "150.50" for $150.50) */
+  triggerPrice: string;
+  /** Price condition: execute when price goes above or below trigger */
+  priceCondition: PriceCondition;
+  /** Source chain where funds are held */
+  sourceChain: IntentChain;
+  /** Source asset to swap from */
+  sourceAsset: string;
+  /** Amount to swap */
+  amount: string;
+  /** Destination chain for output */
+  destinationChain: IntentChain;
+  /** Target asset to receive */
+  targetAsset: string;
+  /** Optional: expiry timestamp (Unix ms). Order cancelled if not triggered by then. */
+  expiresAt?: number;
+  /** Optional: slippage tolerance in basis points */
+  slippageTolerance?: number;
+}
+
+export interface OrderExecuteMetadata extends Record<string, unknown> {
+  action: "order-execute";
+  /** The order ID to execute */
+  orderId: string;
+  /** Price at which the order was triggered */
+  triggeredPrice: string;
+}
+
+export interface OrderCancelMetadata extends Record<string, unknown> {
+  action: "order-cancel";
+  /** The order ID to cancel */
+  orderId: string;
+  /** If true, refund funds to user */
+  refundFunds?: boolean;
+}
+
 export type IntentMetadata =
   | KaminoDepositMetadata
   | KaminoWithdrawMetadata
   | BurrowDepositMetadata
   | BurrowWithdrawMetadata
   | NearSwapMetadata
+  | OrderCreateMetadata
+  | OrderExecuteMetadata
+  | OrderCancelMetadata
   | Record<string, unknown>;
 
 export interface IntentMessage {
