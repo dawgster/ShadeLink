@@ -78,6 +78,10 @@ export const config = {
   /** Number of intents to process in parallel (default: 5) */
   queueConcurrency:
     parseInt(process.env.QUEUE_CONCURRENCY || "", 10) || 5,
+  /** Permission contract ID for self-custodial operations */
+  permissionContractId:
+    process.env.PERMISSION_CONTRACT_ID ||
+    (isTestnet ? "permission.shade.testnet" : "permission.shade.near"),
 };
 
 if (!config.shadeContractId) {

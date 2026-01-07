@@ -64,6 +64,10 @@ export interface Order {
   // Intent tracking
   createIntentId?: string;
   executeIntentId?: string;
+
+  // Permission contract tracking (for self-custodial orders)
+  permissionOperationId?: string;
+  permissionDerivationPath?: string;
 }
 
 // ─── Redis Setup ────────────────────────────────────────────────────────────────

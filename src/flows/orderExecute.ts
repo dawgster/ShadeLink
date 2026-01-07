@@ -32,8 +32,60 @@ import {
   getOrderDescription,
 } from "../state/orders";
 import type { FlowDefinition, FlowContext, FlowResult } from "./types";
+import { signAllowed, isOperationAllowed } from "../permission";
 
 // ─── Helper Functions ──────────────────────────────────────────────────────────
+
+/**
+ * Sign transaction via permission contract if available, otherwise direct MPC
+ * This is the key integration point for self-custodial operations
+ */
+async function signOrderTransaction(
+  order: Order,
+  payload: Uint8Array,
+  teePrice: string,
+  ctx: FlowContext,
+): Promise<Uint8Array> {
+  const { logger } = ctx;
+
+  // If order has permission contract registration, use it
+  if (order.permissionOperationId && order.permissionDerivationPath) {
+    logger.info(`Using permission contract for signing (operation: ${order.permissionOperationId})`);
+
+    // Verify operation is still allowed
+    const allowed = await isOperationAllowed(
+      order.permissionDerivationPath,
+      order.permissionOperationId,
+    );
+
+    if (!allowed) {
+      throw new Error(`Operation ${order.permissionOperationId} is no longer allowed`);
+    }
+
+    // Sign via permission contract (which validates and forwards to MPC)
+    const signature = await signAllowed({
+      derivation_path: order.permissionDerivationPath,
+      operation_id: order.permissionOperationId,
+      payload: Array.from(payload),
+      key_type: order.agentChain === "solana" ? "Eddsa" : "Ecdsa",
+      tee_price: teePrice,
+      tee_timestamp: Date.now(),
+    });
+
+    logger.info(`Received signature via permission contract (${signature.length} bytes)`);
+    return signature;
+  }
+
+  // Fallback to direct MPC signing (less secure, for backward compatibility)
+  logger.warn("Using direct MPC signing (no permission contract registration)");
+
+  // This uses the existing signAndBroadcastSingleSigner which calls MPC directly
+  // For full self-custody, this path should be deprecated
+  throw new Error(
+    "Direct MPC signing not supported for orders without permission registration. " +
+    "Please create the order with a user signature."
+  );
+}
 
 /**
  * Execute Solana transfer to intents for cross-chain swap
