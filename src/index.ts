@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { cors } from "hono/cors";
+import { swaggerUI } from "@hono/swagger-ui";
 import dotenv from "dotenv";
+import { openApiSpec } from "./openapi";
 
 // Import flows first to trigger self-registration before consumer starts
 import "./flows";
@@ -41,6 +43,12 @@ app.use(
 
 // Health check
 app.get("/", (c) => c.json({ message: "App is running" }));
+
+// OpenAPI spec endpoint
+app.get("/api/openapi.json", (c) => c.json(openApiSpec));
+
+// Swagger UI - interactive API documentation
+app.get("/api/docs", swaggerUI({ url: "/api/openapi.json" }));
 
 // Routes
 app.route("/api/eth-account", ethAccount);

@@ -22,6 +22,13 @@ pub trait ChainSignatureContract {
     fn sign(&mut self, request: SignRequest) -> Promise;
 }
 
+/// Ed25519 signature response from MPC contract
+#[derive(Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct Ed25519SignatureResponse {
+    pub signature: Vec<u8>,
+}
+
 /// Sign request format for ChainSignatureContract
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
@@ -407,15 +414,16 @@ impl PermissionContract {
         &mut self,
         derivation_path: DerivationPath,
         operation_id: String,
-        #[callback_result] result: Result<Vec<u8>, PromiseError>,
+        #[callback_result] result: Result<Ed25519SignatureResponse, PromiseError>,
     ) -> Vec<u8> {
         match result {
-            Ok(signature) => {
+            Ok(response) => {
                 env::log_str(&format!(
-                    "MPC signature received for operation {}",
-                    operation_id
+                    "MPC signature received for operation {} ({} bytes)",
+                    operation_id,
+                    response.signature.len()
                 ));
-                signature
+                response.signature
             }
             Err(e) => {
                 // Revert executed flag on failure
@@ -515,6 +523,16 @@ impl PermissionContract {
     /// Check if account is a registered TEE relayer
     pub fn is_tee_relayer(&self, account: AccountId) -> bool {
         self.tee_relayers.contains(&account)
+    }
+
+    /// Get contract configuration
+    pub fn get_config(&self) -> ContractConfig {
+        ContractConfig {
+            owner: self.owner.clone(),
+            mpc_contract: self.mpc_contract.clone(),
+            tee_relayers: self.tee_relayers.iter().collect(),
+            active_operations_count: self.active_operations.len() as u64,
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -640,5 +658,193 @@ mod tests {
 
         contract.register_tee_relayer(relayer.clone());
         assert!(contract.is_tee_relayer(relayer));
+    }
+
+    #[test]
+    fn test_add_and_remove_tee_relayer() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let mpc: AccountId = "mpc.near".parse().unwrap();
+        let relayer: AccountId = "relayer.near".parse().unwrap();
+
+        testing_env!(get_context(owner.clone()).build());
+        let mut contract = PermissionContract::new(owner.clone(), mpc);
+
+        // Add relayer
+        contract.register_tee_relayer(relayer.clone());
+        assert!(contract.is_tee_relayer(relayer.clone()));
+
+        // Remove relayer
+        contract.remove_tee_relayer(relayer.clone());
+        assert!(!contract.is_tee_relayer(relayer));
+    }
+
+    #[test]
+    fn test_get_config() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let mpc: AccountId = "mpc.near".parse().unwrap();
+        let relayer: AccountId = "relayer.near".parse().unwrap();
+
+        testing_env!(get_context(owner.clone()).build());
+        let mut contract = PermissionContract::new(owner.clone(), mpc.clone());
+        contract.register_tee_relayer(relayer.clone());
+
+        let config = contract.get_config();
+        assert_eq!(config.owner, owner);
+        assert_eq!(config.mpc_contract, mpc);
+        assert_eq!(config.tee_relayers.len(), 1);
+        assert!(config.tee_relayers.contains(&relayer));
+        assert_eq!(config.active_operations_count, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only owner can call this method")]
+    fn test_register_relayer_not_owner() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let mpc: AccountId = "mpc.near".parse().unwrap();
+        let not_owner: AccountId = "not_owner.near".parse().unwrap();
+        let relayer: AccountId = "relayer.near".parse().unwrap();
+
+        testing_env!(get_context(owner.clone()).build());
+        let mut contract = PermissionContract::new(owner, mpc);
+
+        // Switch to non-owner
+        testing_env!(get_context(not_owner).build());
+        contract.register_tee_relayer(relayer);
+    }
+
+    #[test]
+    fn test_validate_price_condition_limit_above() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let mpc: AccountId = "mpc.near".parse().unwrap();
+
+        testing_env!(get_context(owner.clone()).build());
+        let contract = PermissionContract::new(owner, mpc);
+
+        let operation = AllowedOperation {
+            operation_id: "test-op".to_string(),
+            derivation_path: "solana-1,test".to_string(),
+            operation_type: AllowedOperationType::LimitOrder {
+                price_asset: "SOL".to_string(),
+                quote_asset: "USDC".to_string(),
+                trigger_price: near_sdk::json_types::U128(150_000_000), // $150
+                condition: PriceCondition::Above,
+                source_asset: "USDC".to_string(),
+                target_asset: "SOL".to_string(),
+                max_amount: near_sdk::json_types::U128(100_000_000),
+            },
+            destination_address: "user".to_string(),
+            destination_chain: "solana".to_string(),
+            slippage_bps: 100,
+            expires_at: None,
+            executed: false,
+            nonce: 1,
+            created_at: 0,
+        };
+
+        // Price above trigger - should pass
+        assert!(contract.validate_price_condition(&operation, 160_000_000, None).is_ok());
+
+        // Price below trigger - should fail
+        assert!(contract.validate_price_condition(&operation, 140_000_000, None).is_err());
+    }
+
+    #[test]
+    fn test_validate_price_condition_stop_loss() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let mpc: AccountId = "mpc.near".parse().unwrap();
+
+        testing_env!(get_context(owner.clone()).build());
+        let contract = PermissionContract::new(owner, mpc);
+
+        let operation = AllowedOperation {
+            operation_id: "test-op".to_string(),
+            derivation_path: "solana-1,test".to_string(),
+            operation_type: AllowedOperationType::StopLoss {
+                price_asset: "SOL".to_string(),
+                quote_asset: "USDC".to_string(),
+                trigger_price: near_sdk::json_types::U128(100_000_000), // $100
+                source_asset: "SOL".to_string(),
+                target_asset: "USDC".to_string(),
+                max_amount: near_sdk::json_types::U128(1_000_000_000),
+            },
+            destination_address: "user".to_string(),
+            destination_chain: "solana".to_string(),
+            slippage_bps: 200,
+            expires_at: None,
+            executed: false,
+            nonce: 1,
+            created_at: 0,
+        };
+
+        // Price below trigger - stop-loss should pass
+        assert!(contract.validate_price_condition(&operation, 90_000_000, None).is_ok());
+
+        // Price above trigger - stop-loss should fail
+        assert!(contract.validate_price_condition(&operation, 110_000_000, None).is_err());
+    }
+
+    #[test]
+    fn test_validate_price_condition_take_profit() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let mpc: AccountId = "mpc.near".parse().unwrap();
+
+        testing_env!(get_context(owner.clone()).build());
+        let contract = PermissionContract::new(owner, mpc);
+
+        let operation = AllowedOperation {
+            operation_id: "test-op".to_string(),
+            derivation_path: "solana-1,test".to_string(),
+            operation_type: AllowedOperationType::TakeProfit {
+                price_asset: "SOL".to_string(),
+                quote_asset: "USDC".to_string(),
+                trigger_price: near_sdk::json_types::U128(200_000_000), // $200
+                source_asset: "SOL".to_string(),
+                target_asset: "USDC".to_string(),
+                max_amount: near_sdk::json_types::U128(1_000_000_000),
+            },
+            destination_address: "user".to_string(),
+            destination_chain: "solana".to_string(),
+            slippage_bps: 100,
+            expires_at: None,
+            executed: false,
+            nonce: 1,
+            created_at: 0,
+        };
+
+        // Price above trigger - take-profit should pass
+        assert!(contract.validate_price_condition(&operation, 210_000_000, None).is_ok());
+
+        // Price below trigger - take-profit should fail
+        assert!(contract.validate_price_condition(&operation, 190_000_000, None).is_err());
+    }
+
+    #[test]
+    fn test_validate_price_condition_swap() {
+        let owner: AccountId = "owner.near".parse().unwrap();
+        let mpc: AccountId = "mpc.near".parse().unwrap();
+
+        testing_env!(get_context(owner.clone()).build());
+        let contract = PermissionContract::new(owner, mpc);
+
+        let operation = AllowedOperation {
+            operation_id: "test-op".to_string(),
+            derivation_path: "solana-1,test".to_string(),
+            operation_type: AllowedOperationType::Swap {
+                source_asset: "USDC".to_string(),
+                target_asset: "SOL".to_string(),
+                max_amount: near_sdk::json_types::U128(100_000_000),
+            },
+            destination_address: "user".to_string(),
+            destination_chain: "solana".to_string(),
+            slippage_bps: 50,
+            expires_at: None,
+            executed: false,
+            nonce: 1,
+            created_at: 0,
+        };
+
+        // Swap has no price condition - should always pass
+        assert!(contract.validate_price_condition(&operation, 0, None).is_ok());
+        assert!(contract.validate_price_condition(&operation, 1_000_000_000, None).is_ok());
     }
 }

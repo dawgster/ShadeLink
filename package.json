@@ -18,6 +18,7 @@
   "dependencies": {
     "@defuse-protocol/one-click-sdk-typescript": "^0.1.13",
     "@hono/node-server": "^1.15.0",
+    "@hono/swagger-ui": "^0.5.3",
     "@kamino-finance/klend-sdk": "^7.3.1",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@neardefi/shade-agent-js": "^1.0.0",

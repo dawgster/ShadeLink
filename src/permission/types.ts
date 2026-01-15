@@ -115,6 +115,7 @@ export interface AddAllowedOperationArgs {
   operation: AllowedOperationInput;
   signature: number[];
   message: number[];
+  signer_address: string;
 }
 
 export interface RemoveAllowedOperationArgs {
@@ -122,6 +123,7 @@ export interface RemoveAllowedOperationArgs {
   operation_id: string;
   signature: number[];
   message: number[];
+  signer_address: string;
 }
 
 export interface SignAllowedArgs {
@@ -144,22 +146,16 @@ export interface GetActiveOperationsResult {
 
 /**
  * Create message for registering a wallet
+ * Must match contract format: "Register wallet for derivation path: {path} with nonce: {nonce}"
  */
 export function createRegisterWalletMessage(
   derivationPath: string,
-  walletType: WalletType,
-  publicKey: Uint8Array,
-  chainAddress: string,
+  _walletType: WalletType,
+  _publicKey: Uint8Array,
+  _chainAddress: string,
   nonce: number,
 ): string {
-  return JSON.stringify({
-    action: "register_wallet",
-    derivation_path: derivationPath,
-    wallet_type: walletType,
-    public_key: Array.from(publicKey),
-    chain_address: chainAddress,
-    nonce,
-  });
+  return `Register wallet for derivation path: ${derivationPath} with nonce: ${nonce}`;
 }
 
 /**

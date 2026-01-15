@@ -2,12 +2,13 @@ use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::UnorderedMap;
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
 
 /// Derivation path for MPC key (e.g., "solana-1,user-xyz")
 pub type DerivationPath = String;
 
 /// Supported wallet types for signature verification
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub enum WalletType {
     /// NEAR Ed25519 with NEP-413 format
@@ -19,7 +20,7 @@ pub enum WalletType {
 }
 
 /// Price condition for triggering operations
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub enum PriceCondition {
     Above,
@@ -27,7 +28,7 @@ pub enum PriceCondition {
 }
 
 /// Operation types user can pre-approve
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 #[serde(tag = "type")]
 pub enum AllowedOperationType {
@@ -35,40 +36,47 @@ pub enum AllowedOperationType {
     Swap {
         source_asset: String,
         target_asset: String,
+        #[schemars(with = "String")]
         max_amount: U128,
     },
     /// Limit order: execute when price crosses threshold
     LimitOrder {
         price_asset: String,
         quote_asset: String,
+        #[schemars(with = "String")]
         trigger_price: U128,
         condition: PriceCondition,
         source_asset: String,
         target_asset: String,
+        #[schemars(with = "String")]
         max_amount: U128,
     },
     /// Stop-loss: sell when price drops below threshold
     StopLoss {
         price_asset: String,
         quote_asset: String,
+        #[schemars(with = "String")]
         trigger_price: U128,
         source_asset: String,
         target_asset: String,
+        #[schemars(with = "String")]
         max_amount: U128,
     },
     /// Take-profit: sell when price rises above threshold
     TakeProfit {
         price_asset: String,
         quote_asset: String,
+        #[schemars(with = "String")]
         trigger_price: U128,
         source_asset: String,
         target_asset: String,
+        #[schemars(with = "String")]
         max_amount: U128,
     },
 }
 
 /// A pre-approved operation
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AllowedOperation {
     /// Unique operation ID
@@ -94,7 +102,7 @@ pub struct AllowedOperation {
 }
 
 /// Input for creating an allowed operation (without auto-generated fields)
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct AllowedOperationInput {
     pub operation_type: AllowedOperationType,
@@ -105,7 +113,7 @@ pub struct AllowedOperationInput {
 }
 
 /// User's registered wallet for signing allowlist changes
-#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug)]
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Clone, Debug, JsonSchema)]
 #[serde(crate = "near_sdk::serde")]
 pub struct RegisteredWallet {
     pub wallet_type: WalletType,
@@ -141,4 +149,17 @@ impl From<&UserPermissions> for UserPermissionsView {
             next_nonce: perms.next_nonce,
         }
     }
+}
+
+/// Contract configuration (for view)
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ContractConfig {
+    #[schemars(with = "String")]
+    pub owner: near_sdk::AccountId,
+    #[schemars(with = "String")]
+    pub mpc_contract: near_sdk::AccountId,
+    #[schemars(with = "Vec<String>")]
+    pub tee_relayers: Vec<near_sdk::AccountId>,
+    pub active_operations_count: u64,
 }
