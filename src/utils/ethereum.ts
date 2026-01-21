@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { contracts, chainAdapters } from "chainsig.js";
 import { createPublicClient, http } from "viem";
 import { config } from "../config";

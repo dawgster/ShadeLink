@@ -30,6 +30,7 @@ Most endpoints require either:
     { name: "Health", description: "Health check endpoints" },
     { name: "Accounts", description: "Derive wallet addresses from MPC" },
     { name: "Intents", description: "Cross-chain swap intents" },
+    { name: "Orders", description: "Conditional orders (limit, stop-loss, take-profit)" },
     { name: "Permission", description: "Self-custodial operation permissions" },
     { name: "Lending", description: "Kamino & Burrow lending positions" },
     { name: "Status", description: "Intent execution status" },
@@ -274,6 +275,255 @@ Most endpoints require either:
               },
             },
           },
+        },
+      },
+    },
+
+    // ─── Orders Routes ─────────────────────────────────────────────────────────
+    "/api/orders": {
+      get: {
+        tags: ["Orders"],
+        summary: "List user orders",
+        description: "Get all orders for a user address",
+        parameters: [
+          { name: "userAddress", in: "query", required: true, schema: { type: "string" }, description: "User's wallet address" },
+          { name: "state", in: "query", schema: { type: "string", enum: ["pending", "active", "triggered", "executed", "cancelled", "expired", "failed"] }, description: "Filter by order state" },
+          { name: "limit", in: "query", schema: { type: "integer", default: 50 }, description: "Maximum results" },
+        ],
+        responses: {
+          "200": {
+            description: "User orders",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    count: { type: "integer" },
+                    orders: { type: "array", items: { $ref: "#/components/schemas/Order" } },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "userAddress is required" },
+        },
+      },
+      post: {
+        tags: ["Orders"],
+        summary: "Create conditional order",
+        description: "Create a limit, stop-loss, or take-profit order. Returns custody address for funding.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["orderId", "orderType", "side", "priceAsset", "quoteAsset", "triggerPrice", "priceCondition", "sourceChain", "sourceAsset", "amount", "destinationChain", "targetAsset", "userDestination"],
+                properties: {
+                  orderId: { type: "string", minLength: 8, description: "Unique order ID (min 8 chars)" },
+                  orderType: { type: "string", enum: ["limit", "stop-loss", "take-profit"], description: "Order type" },
+                  side: { type: "string", enum: ["buy", "sell"], description: "Buy or sell" },
+                  priceAsset: { type: "string", description: "Asset to monitor price (e.g., SOL)", example: "SOL" },
+                  quoteAsset: { type: "string", description: "Quote currency (e.g., USDC)", example: "USDC" },
+                  triggerPrice: { type: "string", description: "Price trigger point", example: "150.00" },
+                  priceCondition: { type: "string", enum: ["above", "below"], description: "Trigger when price goes above or below" },
+                  sourceChain: { type: "string", enum: ["solana", "near"], description: "Custody chain (Solana or NEAR)" },
+                  sourceAsset: { type: "string", description: "Asset to swap from" },
+                  amount: { type: "string", description: "Amount in smallest units" },
+                  destinationChain: { type: "string", enum: ["solana", "near", "ethereum", "base", "arbitrum"], description: "Output chain" },
+                  targetAsset: { type: "string", description: "Asset to receive" },
+                  userDestination: { type: "string", description: "User's wallet address" },
+                  expiresAt: { type: "integer", description: "Expiry timestamp (ms)" },
+                  slippageTolerance: { type: "integer", description: "Slippage in basis points", default: 300 },
+                  userSignature: { $ref: "#/components/schemas/UserSignature" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "202": {
+            description: "Order creation queued",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    intentId: { type: "string" },
+                    orderId: { type: "string" },
+                    state: { type: "string", example: "pending" },
+                    custodyAddress: { type: "string", description: "Deposit funds here to activate" },
+                    custodyChain: { type: "string", enum: ["solana", "near"] },
+                    message: { type: "string" },
+                    order: {
+                      type: "object",
+                      properties: {
+                        orderType: { type: "string" },
+                        side: { type: "string" },
+                        priceAsset: { type: "string" },
+                        quoteAsset: { type: "string" },
+                        triggerPrice: { type: "string" },
+                        priceCondition: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Invalid request" },
+          "503": { description: "Queue disabled" },
+        },
+      },
+    },
+    "/api/orders/{orderId}": {
+      get: {
+        tags: ["Orders"],
+        summary: "Get order details",
+        parameters: [
+          { name: "orderId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": {
+            description: "Order details",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Order" },
+              },
+            },
+          },
+          "404": { description: "Order not found" },
+        },
+      },
+    },
+    "/api/orders/{orderId}/cancel": {
+      post: {
+        tags: ["Orders"],
+        summary: "Cancel order",
+        description: "Cancel an active order and optionally refund funds. Requires signature.",
+        parameters: [
+          { name: "orderId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["userDestination", "userSignature"],
+                properties: {
+                  userDestination: { type: "string", description: "Owner's wallet address" },
+                  refundFunds: { type: "boolean", default: true, description: "Refund remaining funds" },
+                  userSignature: { $ref: "#/components/schemas/UserSignature" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "202": {
+            description: "Cancellation queued",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    intentId: { type: "string" },
+                    orderId: { type: "string" },
+                    state: { type: "string" },
+                    message: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Cannot cancel executed order" },
+          "403": { description: "Not order owner or invalid signature" },
+          "404": { description: "Order not found" },
+        },
+      },
+    },
+    "/api/orders/{orderId}/fund": {
+      post: {
+        tags: ["Orders"],
+        summary: "Mark order as funded",
+        description: "Activate a pending order after deposit is detected",
+        parameters: [
+          { name: "orderId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": {
+            description: "Order activated",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    message: { type: "string" },
+                    order: { $ref: "#/components/schemas/Order" },
+                  },
+                },
+              },
+            },
+          },
+          "404": { description: "Order not found" },
+        },
+      },
+    },
+    "/api/orders/status/poller": {
+      get: {
+        tags: ["Orders"],
+        summary: "Get order poller status",
+        description: "Get status of the price monitoring poller",
+        responses: {
+          "200": {
+            description: "Poller status",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    activePairs: { type: "integer" },
+                    activeOrders: { type: "integer" },
+                    pairs: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          pair: { type: "string", example: "SOL:USDC" },
+                          orderCount: { type: "integer" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/api/orders/status/check": {
+      post: {
+        tags: ["Orders"],
+        summary: "Manually check orders",
+        description: "Trigger a manual price check for all active orders (for testing)",
+        responses: {
+          "200": {
+            description: "Check result",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    checked: { type: "integer" },
+                    triggered: { type: "integer" },
+                  },
+                },
+              },
+            },
+          },
+          "503": { description: "Queue disabled" },
         },
       },
     },
@@ -600,6 +850,51 @@ Most endpoints require either:
   },
   components: {
     schemas: {
+      Order: {
+        type: "object",
+        properties: {
+          orderId: { type: "string" },
+          state: { type: "string", enum: ["pending", "active", "triggered", "executed", "cancelled", "expired", "failed"] },
+          orderType: { type: "string", enum: ["limit", "stop-loss", "take-profit"] },
+          side: { type: "string", enum: ["buy", "sell"] },
+          priceAsset: { type: "string" },
+          quoteAsset: { type: "string" },
+          triggerPrice: { type: "string" },
+          priceCondition: { type: "string", enum: ["above", "below"] },
+          sourceChain: { type: "string" },
+          sourceAsset: { type: "string" },
+          amount: { type: "string" },
+          destinationChain: { type: "string" },
+          targetAsset: { type: "string" },
+          userAddress: { type: "string" },
+          agentAddress: { type: "string", description: "Custody address" },
+          agentChain: { type: "string" },
+          slippageTolerance: { type: "integer" },
+          expiresAt: { type: "integer", nullable: true },
+          createdAt: { type: "integer" },
+          fundedAt: { type: "integer", nullable: true },
+          triggeredAt: { type: "integer", nullable: true },
+          executedAt: { type: "integer", nullable: true },
+          triggeredPrice: { type: "string", nullable: true },
+          executionTxId: { type: "string", nullable: true },
+          outputAmount: { type: "string", nullable: true },
+          error: { type: "string", nullable: true },
+          description: { type: "string", description: "Human-readable order description" },
+        },
+      },
+      UserSignature: {
+        type: "object",
+        description: "User signature for authorization (NEAR NEP-413 or Solana Ed25519)",
+        properties: {
+          type: { type: "string", enum: ["near", "solana"], description: "Signature type" },
+          message: { type: "string", description: "Signed message" },
+          signature: { type: "string", description: "Signature bytes (base64 or hex)" },
+          publicKey: { type: "string", description: "Signer's public key" },
+          nonce: { type: "string", description: "NEP-413 nonce (NEAR only)" },
+          recipient: { type: "string", description: "NEP-413 recipient (NEAR only)" },
+        },
+        required: ["message", "signature", "publicKey"],
+      },
       AllowedOperation: {
         type: "object",
         properties: {

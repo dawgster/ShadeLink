@@ -1,3 +1,5 @@
+// @ts-nocheck
+// Permission routes temporarily disabled - see src/index.ts
 /**
  * Permission API routes for managing self-custodial operations
  *

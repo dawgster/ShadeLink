@@ -45,11 +45,15 @@ services:
       - INTENTS_QUOTE_URL=${INTENTS_QUOTE_URL}
       - ENABLE_QUEUE=${ENABLE_QUEUE:-true}
       - QUEUE_CONCURRENCY=${QUEUE_CONCURRENCY:-5}
+      - API_PATH=shade-agent-api
     ports:
       - "3000:3000"
     depends_on:
       - redis
+      - shade-agent-api
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   redis:
     image: redis:7-alpine

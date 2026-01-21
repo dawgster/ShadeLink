@@ -1,0 +1,79 @@
+{
+  "name": "chainsig.js",
+  "version": "1.1.6",
+  "description": "ChainSig Library",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "browser",
+    "node",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./node/index.d.ts",
+      "browser": {
+        "import": "./browser/index.browser.js",
+        "require": "./browser/index.browser.cjs"
+      },
+      "node": {
+        "import": "./node/index.node.js",
+        "require": "./node/index.node.cjs"
+      },
+      "import": "./node/index.node.js",
+      "require": "./node/index.node.cjs",
+      "default": "./browser/index.browser.js"
+    }
+  },
+  "main": "./node/index.node.cjs",
+  "module": "./node/index.node.js",
+  "types": "./node/index.d.ts",
+  "keywords": [
+    "blockchain",
+    "cryptocurrency",
+    "mpc",
+    "multi-chain",
+    "ethereum",
+    "bitcoin",
+    "cosmos",
+    "near"
+  ],
+  "dependencies": {
+    "@aptos-labs/ts-sdk": "^2.0.1",
+    "@cosmjs/amino": "^0.32.4",
+    "@cosmjs/crypto": "^0.32.4",
+    "@cosmjs/encoding": "^0.32.4",
+    "@cosmjs/math": "^0.32.4",
+    "@cosmjs/proto-signing": "^0.32.4",
+    "@cosmjs/stargate": "^0.32.4",
+    "@mysten/sui": "^1.30.1",
+    "@near-js/accounts": "^2.2.4",
+    "@near-js/crypto": "^2.2.4",
+    "@near-js/keystores": "^2.2.4",
+    "@near-js/providers": "^2.2.4",
+    "@near-js/signers": "^2.2.4",
+    "@near-js/transactions": "^2.2.4",
+    "@near-js/types": "^2.2.4",
+    "@near-js/utils": "^2.2.4",
+    "@noble/hashes": "^1.8.0",
+    "@scure/base": "^1.2.6",
+    "@solana/web3.js": "^1.98.2",
+    "base32-decode": "^1.0.0",
+    "bech32": "^2.0.0",
+    "bitcoinjs-lib": "^6.1.5",
+    "bn.js": "^5.2.1",
+    "bs58": "^6.0.0",
+    "chain-registry": "^1.69.72",
+    "coinselect": "^3.1.13",
+    "cosmjs-types": "^0.9.0",
+    "elliptic": "^6.6.1",
+    "js-sha3": "^0.9.3",
+    "ripple-address-codec": "^5.0.0",
+    "ripple-binary-codec": "^2.3.0",
+    "viem": "^2.22.14",
+    "xrpl": "^4.3.0"
+  },
+  "browser": "./browser/index.browser.js"
+}

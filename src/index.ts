@@ -10,6 +10,7 @@ import "./flows";
 
 import { startQueueConsumer } from "./queue/consumer";
 import { startIntentsPoller } from "./queue/intentsPoller";
+import { startOrderPoller } from "./queue/orderPoller";
 import { config } from "./config";
 import { flowRegistry } from "./flows";
 
@@ -28,7 +29,8 @@ import intents from "./routes/intents";
 import solAccount from "./routes/solAccount";
 import kaminoPositions from "./routes/kaminoPositions";
 import burrowPositions from "./routes/burrowPositions";
-import permission from "./routes/permission";
+import orders from "./routes/orders";
+// import permission from "./routes/permission";
 
 const app = new Hono();
 
@@ -60,7 +62,8 @@ app.route("/api/intents", intents);
 app.route("/api/sol-account", solAccount);
 app.route("/api/kamino-positions", kaminoPositions);
 app.route("/api/burrow-positions", burrowPositions);
-app.route("/api/permission", permission);
+app.route("/api/orders", orders);
+// app.route("/api/permission", permission);
 
 // Start the server
 const port = Number(process.env.PORT || "3000");
@@ -81,6 +84,11 @@ if (config.enableQueue) {
   // Start the intents poller to monitor cross-chain swaps
   startIntentsPoller().catch((err) => {
     console.error("Failed to start intents poller", err);
+  });
+
+  // Start the order poller to monitor prices for conditional orders
+  startOrderPoller().catch((err) => {
+    console.error("Failed to start order poller", err);
   });
 } else {
   console.log("Queue consumer disabled (enable via ENABLE_QUEUE=true)");
